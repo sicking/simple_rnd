@@ -20,6 +20,27 @@ pub trait Rng {
   }
 }
 
+
+pub trait Rand : Rng {
+  fn limit(&mut self, max: u32) -> u32;
+  fn chance(&mut self, num: u32, denom: u32) -> bool;
+}
+
+impl<T: Rng> Rand for T {
+  fn limit(&mut self, max: u32) -> u32 {
+    if max < ((std::u32::MAX as f32 * 0.00001) as u32) {
+      self.gen_u32() % max
+    } else {
+      (self.gen_u64() % (max as u64)) as u32
+    }
+  }
+
+  fn chance(&mut self, num: u32, denom: u32) -> bool {
+    self.limit(denom) < num
+  }
+}
+
+
 pub struct XorShift128Plus {
   state: [u64; 2],
 }
@@ -79,28 +100,6 @@ impl Rng for XorShift64Star {
     x.wrapping_mul(0x2545F4914F6CDD1Du64)
   }
 }
-
-
-
-
-pub trait Rand : Rng {
-  fn limit(&mut self, max: u32) -> u32;
-  fn chance(&mut self, num: u32, denom: u32) -> bool;
-}
-
-impl<T: Rng> Rand for T {
-  fn limit(&mut self, max: u32) -> u32 {
-    if max < ((std::u32::MAX as f32 * 0.00001) as u32) {
-      self.gen_u32() % max
-    } else {
-      (self.gen_u64() % (max as u64)) as u32
-    }
-  }
-
-  fn chance(&mut self, num: u32, denom: u32) -> bool {
-    self.limit(denom) < num
-  }
-} 
 
 
 #[cfg(test)]
