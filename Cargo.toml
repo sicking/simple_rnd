@@ -1,0 +1,7 @@
+[package]
+name = "simple_rnd"
+version = "0.1.0"
+authors = ["Jonas Sicking <jonas@sicking.cc>"]
+
+[dependencies]
+lazy_static = "1.0"
