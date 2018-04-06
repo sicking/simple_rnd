@@ -40,13 +40,34 @@ impl<T: Rng> Rand for T {
   }
 }
 
+pub trait SeedFrom<T> {
+  fn seed_from(T) -> Self;
+}
+
+impl<T> SeedFrom<T> for T {
+  fn seed_from(x: T) -> Self { x }
+}
+impl SeedFrom<i32> for u64 {
+  fn seed_from(x: i32) -> Self { x as u64 }
+}
+impl SeedFrom<u32> for u64 {
+  fn seed_from(x: u32) -> Self { x as u64 }
+}
+impl SeedFrom<i64> for u64 {
+  fn seed_from(x: i64) -> Self { x as u64 }
+}
+impl<T> SeedFrom<T> for [u64; 2] where u64: SeedFrom<T> {
+  fn seed_from(x: T) -> Self { let y = u64::seed_from(x); [y, y] }
+}
+
 
 pub struct XorShift128Plus {
   state: [u64; 2],
 }
 
 impl XorShift128Plus {
-  pub fn new_seeded(mut seed: [u64; 2]) -> Self {
+  pub fn new_seeded<T>(seed: T) -> Self where [u64; 2]: SeedFrom<T> {
+    let mut seed = <[u64; 2]>::seed_from(seed);
     if seed[0] == 0 &&
        seed[1] == 0 {
       seed[0] = 32766;
@@ -54,11 +75,8 @@ impl XorShift128Plus {
     XorShift128Plus { state: seed }
   }
   pub fn new() -> Self {
-    let mut seed = [0u64; 2];
     let mut glob = GLOBAL_RNG.lock().unwrap();
-    seed[0] = glob.gen_u64();
-    seed[1] = glob.gen_u64();
-    XorShift128Plus::new_seeded(seed)
+    XorShift128Plus::new_seeded([glob.gen_u64(), glob.gen_u64()])
   }
 }
 
@@ -79,7 +97,8 @@ pub struct XorShift64Star {
 }
 
 impl XorShift64Star {
-  pub fn new_seeded(mut seed: u64) -> Self {
+  pub fn new_seeded<T>(seed: T) -> Self where u64: SeedFrom<T> {
+    let mut seed = u64::seed_from(seed);
     if seed == 0 {
       seed = 32766;
     }
@@ -201,6 +220,19 @@ mod tests {
 
     let mut a = StdRng::new();
     my_func(&mut a);
+  }
+
+  #[test]
+  fn test_seed_from() {
+    XorShift128Plus::new_seeded([1u64, 2u64]);
+    XorShift128Plus::new_seeded(-1i64);
+    XorShift128Plus::new_seeded(-1i32);
+    XorShift128Plus::new_seeded(1u64);
+    XorShift128Plus::new_seeded(1u32);
+    XorShift64Star::new_seeded(-1i64);
+    XorShift64Star::new_seeded(-1i32);
+    XorShift64Star::new_seeded(1u64);
+    XorShift64Star::new_seeded(1u32);
   }
 }
 
