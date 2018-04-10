@@ -22,21 +22,29 @@ pub trait Rng {
 
 
 pub trait Rand : Rng {
-  fn limit(&mut self, max: u32) -> u32;
+  fn below(&mut self, max: u32) -> u32;
   fn chance(&mut self, num: u32, denom: u32) -> bool;
+  fn zeroone(&mut self) -> f32;
 }
 
 impl<T: Rng> Rand for T {
-  fn limit(&mut self, max: u32) -> u32 {
-    if max < ((std::u32::MAX as f32 * 0.00001) as u32) {
-      self.gen_u32() % max
+  fn below(&mut self, limit: u32) -> u32 {
+    const MAX_U32_LIMIT: u32 = std::u32::MAX / 10000;
+    if limit < MAX_U32_LIMIT {
+      self.gen_u32() % limit
     } else {
-      (self.gen_u64() % (max as u64)) as u32
+      (self.gen_u64() % (limit as u64)) as u32
     }
   }
 
   fn chance(&mut self, num: u32, denom: u32) -> bool {
-    self.limit(denom) < num
+    self.below(denom) < num
+  }
+
+  fn zeroone(&mut self) -> f32 {
+    let frac = self.gen_u32() & ((1 << 24) - 1);
+    const EXP: u32 = 127u32 << 23;
+    unsafe { std::mem::transmute::<u32, f32>(frac | EXP) - 1.0 }
   }
 }
 
@@ -87,7 +95,7 @@ impl Rng for XorShift128Plus {
     self.state[0] = y;
     x ^= x << 23;
     self.state[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
-    return self.state[1].wrapping_add(y);
+    self.state[1].wrapping_add(y)
   }
 }
 
@@ -188,11 +196,11 @@ mod tests {
   }
 
   #[test]
-  fn test_limit() {
+  fn test_below() {
     let mut a = StdRng::new();
     let mut counts = [0u32; 47];
     for _ in 0..4700 {
-      counts[a.limit(47) as usize] += 1;
+      counts[a.below(47) as usize] += 1;
     }
     for count in counts.iter() {
       assert!(50 <= *count && *count <= 150);
@@ -212,10 +220,12 @@ mod tests {
   }
 
   #[test]
-  fn test_api() {
+  fn test_trait_obj() {
     fn my_func(r: &mut Rand) {
       r.gen_u32();
       r.gen_u64();
+      r.below(5);
+      r.chance(1, 10);
     }
 
     let mut a = StdRng::new();
@@ -233,6 +243,29 @@ mod tests {
     XorShift64Star::new_seeded(-1i32);
     XorShift64Star::new_seeded(1u64);
     XorShift64Star::new_seeded(1u32);
+  }
+
+  struct TestRng {
+    x: u32,
+  }
+  impl Rng for TestRng {
+    fn gen_u32(&mut self) -> u32 {
+      self.x
+    }
+  }
+
+  #[test]
+  fn test_zeroone() {
+    let mut a = StdRng::new();
+    for _ in 0..5000 {
+      let v = a.zeroone();
+      assert!(0.0 <= v && v < 1.0);
+    }
+    let mut t = TestRng { x: 0 };
+    assert!(t.zeroone() == 0.0);
+    t.x = 0xffff_ffff;
+    assert!(t.zeroone() > 0.0);
+    assert!(t.zeroone() < 1.0);
   }
 }
 
