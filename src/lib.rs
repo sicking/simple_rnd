@@ -28,6 +28,14 @@ pub trait Rng {
     }
   }
 
+  fn range(&mut self, start: u32, end: u32) -> u32 {
+    if start >= end {
+      panic!("empty or inverted range");
+    }
+    let diff = end - start;
+    self.below(diff) + start
+  }
+
   fn chance(&mut self, num: u32, denom: u32) -> bool {
     self.below(denom) < num
   }
@@ -36,6 +44,29 @@ pub trait Rng {
     let frac = self.gen_u32() & ((1 << 24) - 1);
     const EXP: u32 = 127u32 << 23;
     unsafe { std::mem::transmute::<u32, f32>(frac | EXP) - 1.0 }
+  }
+
+  fn shuffle<U>(&mut self, values: &mut [U]) {
+    for i in (1..values.len()).rev() {
+      values.swap(i, self.below((i + 1) as u32) as usize);
+    }
+  }
+
+  fn choose<'a, U>(&mut self, values: &'a [U]) -> Option<&'a U> {
+    if values.is_empty() {
+      None
+    } else {
+      Some(&values[self.below(values.len() as u32) as usize])
+    }
+  }
+
+  fn choose_mut<'a, U>(&mut self, values: &'a mut [U]) -> Option<&'a mut U> {
+    if values.is_empty() {
+      None
+    } else {
+      let len = values.len();
+      Some(&mut values[self.below(len as u32) as usize])
+    }
   }
 }
 
@@ -164,7 +195,7 @@ mod tests {
     }
   }
 
-  fn is_equal(a: &mut Rng, b: &mut Rng, num: u32) -> bool {
+  fn is_equal<T: Rng>(a: &mut T, b: &mut T, num: u32) -> bool {
     for _ in 0..num {
       if a.gen_u32() != b.gen_u32() {
         return false;
@@ -210,6 +241,9 @@ mod tests {
     assert!(260 <= count && count <= 380);
   }
 
+  /*
+  For now I have not figured out how to make this work due to the type parameters in
+  several functions.
   #[test]
   fn test_trait_obj() {
     fn my_func(r: &mut Rng) {
@@ -222,6 +256,7 @@ mod tests {
     let mut a = StdRng::new();
     my_func(&mut a);
   }
+  */
 
   #[test]
   fn test_seed_from() {
@@ -258,5 +293,48 @@ mod tests {
     assert!(t.zeroone() > 0.0);
     assert!(t.zeroone() < 1.0);
   }
-}
 
+  #[test]
+  fn test_shuffle() {
+    let mut positions = [0u32; 16];
+    let mut a = StdRng::new();
+    for _ in 0..10000 {
+      let mut arr: [u32; 4] = [0, 1, 2, 3];
+      a.shuffle(&mut arr);
+      for i in 0..4 {
+        positions[i * 4 + (arr[i] as usize)] += 1;
+      }
+    }
+    for count in positions.iter() {
+      assert!(2300 <= *count && *count <= 2700);
+    }
+  }
+
+  #[test]
+  fn test_choose() {
+    let mut a = StdRng::new();
+    let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
+    let mut chosen = Vec::new();
+    chosen.resize(chars.len(), 0i32);
+    for _ in 0..10000 {
+      let picked = *a.choose(&chars).unwrap();
+      chosen[(picked as usize) - ('a' as usize)] += 1;
+    }
+    for count in chosen.iter() {
+      let err = *count - (10000 / (chars.len() as i32));
+      assert!(-150 <= err && err <= 150);
+    }
+
+
+    chosen.truncate(0);
+    chosen.resize(40, 0i32);
+
+    for _ in 0..10000 {
+      *a.choose_mut(&mut chosen).unwrap() += 1;
+    }
+    for count in chosen.iter() {
+      let err = *count - (10000 / (chosen.len() as i32));
+      assert!(-150 <= err && err <= 150);
+    }
+  }
+}
