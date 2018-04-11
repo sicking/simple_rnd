@@ -18,16 +18,7 @@ pub trait Rng {
     let y = self.gen_u32() as u64;
     x << 32 | y
   }
-}
 
-
-pub trait Rand : Rng {
-  fn below(&mut self, max: u32) -> u32;
-  fn chance(&mut self, num: u32, denom: u32) -> bool;
-  fn zeroone(&mut self) -> f32;
-}
-
-impl<T: Rng> Rand for T {
   fn below(&mut self, limit: u32) -> u32 {
     const MAX_U32_LIMIT: u32 = std::u32::MAX / 10000;
     if limit < MAX_U32_LIMIT {
@@ -221,7 +212,7 @@ mod tests {
 
   #[test]
   fn test_trait_obj() {
-    fn my_func(r: &mut Rand) {
+    fn my_func(r: &mut Rng) {
       r.gen_u32();
       r.gen_u64();
       r.below(5);
