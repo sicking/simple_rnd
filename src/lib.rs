@@ -9,6 +9,10 @@ lazy_static! {
 
 pub type StdRng = XorShift64Star;
 
+pub trait Rangeable : Sized {
+  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
+}
+
 pub trait Rng {
   fn gen_u32(&mut self) -> u32 {
     self.gen_u64() as u32
@@ -19,16 +23,15 @@ pub trait Rng {
     x << 32 | y
   }
 
-  fn below(&mut self, limit: u32) -> u32 {
-    const MAX_U32_LIMIT: u32 = std::u32::MAX / 10000;
-    if limit < MAX_U32_LIMIT {
-      self.gen_u32() % limit
-    } else {
-      (self.gen_u64() % (limit as u64)) as u32
-    }
+  fn below<T>(&mut self, limit: T) -> T where T: Rangeable {
+    T::rng_below(self, limit)
   }
 
-  fn range(&mut self, start: u32, end: u32) -> u32 {
+  fn range<T>(&mut self, start: T, end: T) -> T where T: Rangeable +
+                                                         Copy +
+                                                         std::cmp::PartialOrd +
+                                                         std::ops::Add<T, Output=T> +
+                                                         std::ops::Sub<T, Output=T> {
     if start >= end {
       panic!("empty or inverted range");
     }
@@ -48,7 +51,7 @@ pub trait Rng {
 
   fn shuffle<U>(&mut self, values: &mut [U]) {
     for i in (1..values.len()).rev() {
-      values.swap(i, self.below((i + 1) as u32) as usize);
+      values.swap(i, self.below(i + 1));
     }
   }
 
@@ -56,7 +59,7 @@ pub trait Rng {
     if values.is_empty() {
       None
     } else {
-      Some(&values[self.below(values.len() as u32) as usize])
+      Some(&values[self.below(values.len())])
     }
   }
 
@@ -65,10 +68,38 @@ pub trait Rng {
       None
     } else {
       let len = values.len();
-      Some(&mut values[self.below(len as u32) as usize])
+      Some(&mut values[self.below(len)])
     }
   }
 }
+
+macro_rules! impl_rangable {
+  ($ty: ty) => (
+    #[allow(unused_comparisons)]
+    impl Rangeable for $ty {
+      fn rng_below<R: Rng + ?Sized> (rng: &mut R, limit: $ty) -> $ty {
+        if limit < 0 {
+          panic!("Rng.below() called with limit < 0");
+        }
+        if (limit as u32) < 429_496 { // 32bit max / 10000. I.e. bias is less than 0.01%
+          (rng.gen_u32() % (limit as u32)) as $ty
+        } else {
+          (rng.gen_u64() % (limit as u64)) as $ty
+        }
+      }
+    }
+  )
+}
+impl_rangable!(u8);
+impl_rangable!(i8);
+impl_rangable!(u16);
+impl_rangable!(i16);
+impl_rangable!(u32);
+impl_rangable!(i32);
+impl_rangable!(u64);
+impl_rangable!(i64);
+impl_rangable!(usize);
+impl_rangable!(isize);
 
 pub trait SeedFrom<T> {
   fn seed_from(T) -> Self;
@@ -77,18 +108,26 @@ pub trait SeedFrom<T> {
 impl<T> SeedFrom<T> for T {
   fn seed_from(x: T) -> Self { x }
 }
-impl SeedFrom<i32> for u64 {
-  fn seed_from(x: i32) -> Self { x as u64 }
-}
-impl SeedFrom<u32> for u64 {
-  fn seed_from(x: u32) -> Self { x as u64 }
-}
-impl SeedFrom<i64> for u64 {
-  fn seed_from(x: i64) -> Self { x as u64 }
-}
 impl<T> SeedFrom<T> for [u64; 2] where u64: SeedFrom<T> {
   fn seed_from(x: T) -> Self { let y = u64::seed_from(x); [y, y] }
 }
+macro_rules! impl_seed_from {
+  ($from_ty: ty, $to_ty: ty) => (
+    impl SeedFrom<$from_ty> for $to_ty {
+      fn seed_from(x: $from_ty) -> Self { x as $to_ty }
+    }
+  )
+}
+impl_seed_from!(i8, u64);
+impl_seed_from!(u8, u64);
+impl_seed_from!(i16, u64);
+impl_seed_from!(u16, u64);
+impl_seed_from!(i32, u64);
+impl_seed_from!(u32, u64);
+impl_seed_from!(i64, u64);
+//impl_seed_from!(u64, u64);
+impl_seed_from!(isize, u64);
+impl_seed_from!(usize, u64);
 
 
 pub struct XorShift128Plus {
@@ -222,7 +261,7 @@ mod tests {
     let mut a = StdRng::new();
     let mut counts = [0u32; 47];
     for _ in 0..4700 {
-      counts[a.below(47) as usize] += 1;
+      counts[a.below(47usize)] += 1;
     }
     for count in counts.iter() {
       assert!(50 <= *count && *count <= 150);
@@ -263,20 +302,39 @@ mod tests {
     XorShift128Plus::new_seeded([1u64, 2u64]);
     XorShift128Plus::new_seeded(-1i64);
     XorShift128Plus::new_seeded(-1i32);
+    XorShift128Plus::new_seeded(-1i16);
+    XorShift128Plus::new_seeded(-1i8);
     XorShift128Plus::new_seeded(1u64);
     XorShift128Plus::new_seeded(1u32);
+    XorShift128Plus::new_seeded(1u16);
+    XorShift128Plus::new_seeded(1u8);
     XorShift64Star::new_seeded(-1i64);
     XorShift64Star::new_seeded(-1i32);
+    XorShift64Star::new_seeded(-1i16);
+    XorShift64Star::new_seeded(-1i8);
     XorShift64Star::new_seeded(1u64);
     XorShift64Star::new_seeded(1u32);
+    XorShift64Star::new_seeded(1u16);
+    XorShift64Star::new_seeded(1u8);
   }
 
   struct TestRng {
     x: u32,
+    fail64: bool,
+  }
+  impl TestRng {
+    fn new(x: u32) -> Self { TestRng { x, fail64: false } }
+    fn new_fail64(x: u32) -> Self { TestRng { x, fail64: true } }
   }
   impl Rng for TestRng {
     fn gen_u32(&mut self) -> u32 {
       self.x
+    }
+    fn gen_u64(&mut self) -> u64 {
+      if self.fail64 {
+        panic!("gen_u64 called");
+      }
+      ((self.x as u64) << 32) | (self.x as u64)
     }
   }
 
@@ -287,11 +345,12 @@ mod tests {
       let v = a.zeroone();
       assert!(0.0 <= v && v < 1.0);
     }
-    let mut t = TestRng { x: 0 };
+    let mut t = TestRng::new(0);
     assert!(t.zeroone() == 0.0);
     t.x = 0xffff_ffff;
     assert!(t.zeroone() > 0.0);
     assert!(t.zeroone() < 1.0);
+    assert!(t.zeroone() > 0.999);
   }
 
   #[test]
@@ -299,10 +358,10 @@ mod tests {
     let mut positions = [0u32; 16];
     let mut a = StdRng::new();
     for _ in 0..10000 {
-      let mut arr: [u32; 4] = [0, 1, 2, 3];
+      let mut arr: [usize; 4] = [0, 1, 2, 3];
       a.shuffle(&mut arr);
       for i in 0..4 {
-        positions[i * 4 + (arr[i] as usize)] += 1;
+        positions[i * 4 + arr[i]] += 1;
       }
     }
     for count in positions.iter() {
@@ -336,5 +395,49 @@ mod tests {
       let err = *count - (10000 / (chosen.len() as i32));
       assert!(-150 <= err && err <= 150);
     }
+  }
+
+  #[test]
+  fn test_below_types() {
+    let mut a = StdRng::new();
+    assert_eq!(a.below(1i8), 0);
+    assert_eq!(a.below(1u8), 0);
+    assert_eq!(a.below(1i16), 0);
+    assert_eq!(a.below(1u16), 0);
+    assert_eq!(a.below(1i32), 0);
+    assert_eq!(a.below(1u32), 0);
+    assert_eq!(a.below(1i64), 0);
+    assert_eq!(a.below(1u64), 0);
+    assert_eq!(a.below(1isize), 0);
+    assert_eq!(a.below(1usize), 0);
+    assert!(std::panic::catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
+    let mut t = TestRng::new_fail64(0);
+    t.below(std::u16::MAX);
+    t.below(std::i16::MAX);
+    t.below(std::u8::MAX);
+    t.below(std::i8::MAX);
+  }
+
+  #[test]
+  fn test_range_types() {
+    let mut a = StdRng::new();
+    assert_eq!(a.range(-2i8, -1), -2);
+    assert_eq!(a.range(1u8, 2), 1);
+    assert_eq!(a.range(-2i16, -1), -2);
+    assert_eq!(a.range(1u16, 2), 1);
+    assert_eq!(a.range(-2i32, -1), -2);
+    assert_eq!(a.range(1u32, 2), 1);
+    assert_eq!(a.range(-2i64, -1), -2);
+    assert_eq!(a.range(1u64, 2), 1);
+    assert_eq!(a.range(-2isize, -1), -2);
+    assert_eq!(a.range(1usize, 2), 1);
+  }
+
+  #[test]
+  fn test_below_panics() {
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(0u32)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(-100i8)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().range(2, 1)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
   }
 }
