@@ -10,6 +10,9 @@ lazy_static! {
 
 pub type StdRng = XorShift64Star;
 
+pub trait ToSample<U> {
+  fn to_sample(self) -> U;
+}
 pub trait Rangeable : Sized {
   fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
 }
@@ -80,42 +83,59 @@ pub trait Rng {
   }
 
   fn sample_ref<'a, U>(&mut self, values: &'a [U], size: usize) -> Vec<&'a U> {
-    let len = values.len();
-    if size > len {
-      panic!("Sample set smaller than requested sample size");
-    }
-
-    let mut res = Vec::with_capacity(size);
-
-    // For small values of 'size', it's better to use a hash set to track
-    // which entries we've already selected and re-select if we end up
-    // selecting the same entry again.
-    // As size gets closer to values.len(), it's better to track which entries
-    // we've not yet selected and select from this set.
-    // Where the line goes between which approach is faster needs to be tuned.
-    // The below is a very rough guess.
-    if size * 4 < len {
-      let mut selected = HashSet::new();
-      for _ in 0..size {
-        let mut pos = self.below(len);
-        while !selected.insert(pos) {
-          pos = self.below(len);
-        }
-        // Could use get_unchecked on index reference for performance.
-        res.push(&values[pos]);
-      }
-    } else {
-      // Track remaining entries
-      let mut remaining = (0..len).collect::<Vec<usize>>();
-      for i in 0..size {
-        let pos = self.below(len - i);
-        // Could use get_unchecked on all index references for performance.
-        res.push(&values[remaining[pos]]);
-        remaining[pos] = remaining[len - i - 1];
-      }
-    }
-    res
+    sample_helper(self, values, size)
   }
+
+  fn sample_copy<'a, U: Copy>(&mut self, values: &'a [U], size: usize) -> Vec<U> {
+    sample_helper(self, values, size)
+  }
+}
+
+impl<'a, T: Copy> ToSample<T> for &'a T {
+  fn to_sample(self) -> T { *self }
+}
+impl<T> ToSample<T> for T {
+  fn to_sample(self) -> T { self }
+}
+
+fn sample_helper<'a, R: Rng + ?Sized, T, U>(rng: &mut R, values: &'a [T], size: usize) -> Vec<U>
+  where &'a T: ToSample<U>
+{
+  let len = values.len();
+  if size > len {
+    panic!("Sample set smaller than requested sample size");
+  }
+
+  let mut res = Vec::<U>::with_capacity(size);
+
+  // For small values of 'size', it's better to use a hash set to track
+  // which entries we've already selected and re-select if we end up
+  // selecting the same entry again.
+  // As 'size' gets closer to values.len(), it's better to track which entries
+  // we've not yet selected and select from this set.
+  // Where the line goes between which approach is faster needs to be tuned.
+  // The below is a very rough guess.
+  if size * 4 < len {
+    let mut selected = HashSet::new();
+    for _ in 0..size {
+      let mut pos = rng.below(len);
+      while !selected.insert(pos) {
+        pos = rng.below(len);
+      }
+      // Could use get_unchecked on index reference for performance.
+      res.push((&values[pos]).to_sample());
+    }
+  } else {
+    // Track remaining entries
+    let mut remaining = (0..len).collect::<Vec<usize>>();
+    for i in 0..size {
+      let pos = rng.below(len - i);
+      // Could use get_unchecked on all index references for performance.
+      res.push((&values[remaining[pos]]).to_sample());
+      remaining[pos] = remaining[len - i - 1];
+    }
+  }
+  res
 }
 
 macro_rules! impl_rangable {
@@ -504,14 +524,21 @@ mod tests {
   #[test]
   fn test_sample() {
     let mut a = StdRng::new();
+    let vals = (0u16..1000).rev().collect::<Vec<u16>>();
     for i in 0..100 {
-      let vals = (0u16..1000).rev().collect::<Vec<u16>>();
-      let selected = a.sample_ref(&vals, i * 10);
+      let selected: Vec<&u16> = a.sample_ref(&vals, i * 10);
       assert_eq!(selected.len(), i * 10);
       let mut found = HashSet::new();
       for val_ref in selected {
         assert!(found.insert(*val_ref));
-        ;
+      }
+    }
+    for i in 0..100 {
+      let selected: Vec<u16> = a.sample_copy(&vals, i * 10);
+      assert_eq!(selected.len(), i * 10);
+      let mut found = HashSet::new();
+      for val_ref in selected {
+        assert!(found.insert(val_ref));
       }
     }
   }
