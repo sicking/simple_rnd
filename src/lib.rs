@@ -55,6 +55,12 @@ pub trait Rng {
     }
   }
 
+  fn permutation(&mut self, size: usize) -> Vec<usize> {
+    let mut res = (0usize..size).collect::<Vec<usize>>();
+    self.shuffle(&mut res);
+    res
+  }
+
   fn choose<'a, U>(&mut self, values: &'a [U]) -> Option<&'a U> {
     if values.is_empty() {
       None
@@ -439,5 +445,20 @@ mod tests {
     assert!(std::panic::catch_unwind(|| StdRng::new().below(-100i8)).is_err());
     assert!(std::panic::catch_unwind(|| StdRng::new().range(2, 1)).is_err());
     assert!(std::panic::catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
+  }
+
+  #[test]
+  fn test_permutation() {
+    let mut a = StdRng::new();
+    let mut found = Vec::new();
+    found.resize(20, false);
+    let perm = a.permutation(found.len());
+    for pos in perm.iter() {
+      assert_eq!(found[*pos], false);
+      found[*pos] = true;
+    }
+    for val in found {
+      assert_eq!(val, true);
+    }
   }
 }
