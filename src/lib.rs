@@ -10,9 +10,6 @@ lazy_static! {
 
 pub type StdRng = XorShift64Star;
 
-pub trait ToSample<U> {
-  fn to_sample(self) -> U;
-}
 pub trait Rangeable : Sized {
   fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
 }
@@ -82,61 +79,78 @@ pub trait Rng {
     }
   }
 
-  fn sample_ref<'a, U>(&mut self, values: &'a [U], size: usize) -> Vec<&'a U> {
-    sample_helper(self, values, size)
-  }
-
-  fn sample_copy<'a, U: Copy>(&mut self, values: &'a [U], size: usize) -> Vec<U> {
-    sample_helper(self, values, size)
+  fn sample<'a, U>(&'a mut self, values: &'a [U], sample_size: usize) -> SampleIter<'a, Self, U> where Self: Sized {
+    SampleIter::new(self, &values, sample_size)
   }
 }
 
-impl<'a, T: Copy> ToSample<T> for &'a T {
-  fn to_sample(self) -> T { *self }
+enum SampleIterData {
+  Picked(HashSet<usize>),
+  Remaining(Vec<usize>),
 }
-impl<T> ToSample<T> for T {
-  fn to_sample(self) -> T { self }
+pub struct SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
+  rng: &'a mut R,
+  values: &'a [U],
+  n: usize,
+  data: SampleIterData,
 }
 
-fn sample_helper<'a, R: Rng + ?Sized, T, U>(rng: &mut R, values: &'a [T], size: usize) -> Vec<U>
-  where &'a T: ToSample<U>
-{
-  let len = values.len();
-  if size > len {
-    panic!("Sample set smaller than requested sample size");
-  }
-
-  let mut res = Vec::<U>::with_capacity(size);
-
-  // For small values of 'size', it's better to use a hash set to track
-  // which entries we've already selected and re-select if we end up
-  // selecting the same entry again.
-  // As 'size' gets closer to values.len(), it's better to track which entries
-  // we've not yet selected and select from this set.
-  // Where the line goes between which approach is faster needs to be tuned.
-  // The below is a very rough guess.
-  if size * 4 < len {
-    let mut selected = HashSet::new();
-    for _ in 0..size {
-      let mut pos = rng.below(len);
-      while !selected.insert(pos) {
-        pos = rng.below(len);
-      }
-      // Could use get_unchecked on index reference for performance.
-      res.push((&values[pos]).to_sample());
+impl<'a, R, U> SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
+  fn new(rng: &'a mut R, values: &'a [U], sample_size: usize) -> SampleIter<'a, R, U> {
+    let set_size = values.len();
+    if sample_size > set_size {
+      panic!("Sample set smaller than requested sample size");
     }
-  } else {
-    // Track remaining entries
-    let mut remaining = (0..len).collect::<Vec<usize>>();
-    for i in 0..size {
-      let pos = rng.below(len - i);
-      // Could use get_unchecked on all index references for performance.
-      res.push((&values[remaining[pos]]).to_sample());
-      remaining[pos] = remaining[len - i - 1];
+
+    // For small values of 'sample_size', it's better to use a hash set to track
+    // which entries we've already selected and re-select if we end up
+    // selecting the same entry again.
+    // If 'sample_size' is closer to values.len(), it's better to track which entries
+    // we've not yet selected and pick from this set.
+    // Where the line goes between which approach is faster needs to be tuned.
+    // The below is a very rough guess.
+    if sample_size * 4 < set_size {
+      SampleIter { rng, values, n: sample_size, data: SampleIterData::Picked(HashSet::new()) }
+    } else {
+      SampleIter { rng, values, n: sample_size, data: SampleIterData::Remaining((0..set_size).collect()) }
     }
   }
-  res
 }
+
+impl<'a, R, U> Iterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
+  type Item = &'a U;
+
+  fn next(&mut self) -> Option<&'a U> {
+    if self.n == 0 {
+      return None;
+    }
+    self.n -= 1;
+
+    match self.data {
+      SampleIterData::Picked(ref mut picked) => {
+        let mut pos = self.rng.below(self.values.len());
+        while !picked.insert(pos) {
+          pos = self.rng.below(self.values.len());
+        }
+        // Could use get_unchecked on index reference for performance.
+        Some(&self.values[pos])
+      },
+      SampleIterData::Remaining(ref mut remaining) => {
+        let pos = self.rng.below(self.n + 1);
+        // Could use get_unchecked on all index references for performance.
+        let res_pos = remaining[pos];
+        remaining[pos] = remaining[self.n];
+        Some(&self.values[res_pos])
+      },
+    }
+  }
+
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    (self.n, Some(self.n))
+  }
+}
+
+impl<'a, R, U> ExactSizeIterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {}
 
 macro_rules! impl_rangable {
   ($ty: ty) => (
@@ -526,15 +540,16 @@ mod tests {
     let mut a = StdRng::new();
     let vals = (0u16..1000).rev().collect::<Vec<u16>>();
     for i in 0..100 {
-      let selected: Vec<&u16> = a.sample_ref(&vals, i * 10);
+      let selected = a.sample(&vals, i * 10);
       assert_eq!(selected.len(), i * 10);
       let mut found = HashSet::new();
       for val_ref in selected {
         assert!(found.insert(*val_ref));
       }
+      assert_eq!(found.len(), i * 10);
     }
     for i in 0..100 {
-      let selected: Vec<u16> = a.sample_copy(&vals, i * 10);
+      let selected: Vec<u16> = a.sample(&vals, i * 10).map(|x| *x).collect();
       assert_eq!(selected.len(), i * 10);
       let mut found = HashSet::new();
       for val_ref in selected {
