@@ -12,6 +12,7 @@ pub type StdRng = XorShift64Star;
 
 pub trait Rangeable : Sized {
   fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
+  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: Self, end: Self) -> Self;
 }
 
 pub trait Rng {
@@ -28,16 +29,8 @@ pub trait Rng {
     T::rng_below(self, limit)
   }
 
-  fn range<T>(&mut self, start: T, end: T) -> T where T: Rangeable +
-                                                         Copy +
-                                                         std::cmp::PartialOrd +
-                                                         std::ops::Add<T, Output=T> +
-                                                         std::ops::Sub<T, Output=T> {
-    if start >= end {
-      panic!("empty or inverted range");
-    }
-    let diff = end - start;
-    self.below(diff) + start
+  fn range<T>(&mut self, start: T, end: T) -> T where T: Rangeable {
+    T::rng_range(self, start, end)
   }
 
   fn chance(&mut self, num: u32, denom: u32) -> bool {
@@ -153,10 +146,10 @@ impl<'a, R, U> Iterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
 impl<'a, R, U> ExactSizeIterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {}
 
 macro_rules! impl_rangable {
-  ($ty: ty) => (
+  ($ty: ty, $uty: ty) => (
     #[allow(unused_comparisons)]
     impl Rangeable for $ty {
-      fn rng_below<R: Rng + ?Sized> (rng: &mut R, limit: $ty) -> $ty {
+      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
         if limit < 0 {
           panic!("Rng.below() called with limit < 0");
         }
@@ -166,19 +159,27 @@ macro_rules! impl_rangable {
           (rng.gen_u64() % (limit as u64)) as $ty
         }
       }
+
+      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
+        if start >= end {
+          panic!("empty or inverted range");
+        }
+        let diff = end.wrapping_sub(start) as $uty;
+        (rng.below(diff) as $ty).wrapping_add(start)
+      }
     }
   )
 }
-impl_rangable!(u8);
-impl_rangable!(i8);
-impl_rangable!(u16);
-impl_rangable!(i16);
-impl_rangable!(u32);
-impl_rangable!(i32);
-impl_rangable!(u64);
-impl_rangable!(i64);
-impl_rangable!(usize);
-impl_rangable!(isize);
+impl_rangable!(u8, u8);
+impl_rangable!(i8, u8);
+impl_rangable!(u16, u16);
+impl_rangable!(i16, u16);
+impl_rangable!(u32, u32);
+impl_rangable!(i32, u32);
+impl_rangable!(u64, u64);
+impl_rangable!(i64, u64);
+impl_rangable!(usize, usize);
+impl_rangable!(isize, usize);
 
 pub trait SeedFrom<T> {
   fn seed_from(T) -> Self;
@@ -498,7 +499,7 @@ mod tests {
   }
 
   #[test]
-  fn test_range_types() {
+  fn test_range_primitives() {
     let mut a = StdRng::new();
     assert_eq!(a.range(-2i8, -1), -2);
     assert_eq!(a.range(1u8, 2), 1);
@@ -510,6 +511,20 @@ mod tests {
     assert_eq!(a.range(1u64, 2), 1);
     assert_eq!(a.range(-2isize, -1), -2);
     assert_eq!(a.range(1usize, 2), 1);
+
+    for _ in 0..10000 {
+      let x = a.range(-120i8, 120);
+      assert!(-120 <= x && x < 120);
+    }
+
+    let x = a.range(-120i8, 120);
+    assert!(-120 <= x && x < 120);
+    let x = a.range(-32760i16, 32760);
+    assert!(-32760 <= x && x < 32760);
+    let x = a.range(std::i32::MIN, std::i32::MAX);
+    assert!(std::i32::MIN <= x && x < std::i32::MAX);
+    let x = a.range(std::i64::MIN, std::i64::MAX);
+    assert!(std::i64::MIN <= x && x < std::i64::MAX);
   }
 
   #[test]
