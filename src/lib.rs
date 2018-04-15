@@ -55,7 +55,7 @@ pub trait Rng {
     res
   }
 
-  fn choose<'a, U>(&mut self, values: &'a [U]) -> Option<&'a U> {
+  fn choose<'a, T>(&mut self, values: &'a [T]) -> Option<&'a T> {
     if values.is_empty() {
       None
     } else {
@@ -63,7 +63,7 @@ pub trait Rng {
     }
   }
 
-  fn choose_mut<'a, U>(&mut self, values: &'a mut [U]) -> Option<&'a mut U> {
+  fn choose_mut<'a, T>(&mut self, values: &'a mut [T]) -> Option<&'a mut T> {
     if values.is_empty() {
       None
     } else {
@@ -72,7 +72,7 @@ pub trait Rng {
     }
   }
 
-  fn sample<'a, U>(&'a mut self, values: &'a [U], sample_size: usize) -> SampleIter<'a, Self, U> where Self: Sized {
+  fn sample<'a, T>(&'a mut self, values: &'a [T], sample_size: usize) -> SampleIter<'a, Self, T> where Self: Sized {
     SampleIter::new(self, &values, sample_size)
   }
 }
@@ -81,15 +81,15 @@ enum SampleIterData {
   Picked(HashSet<usize>),
   Remaining(Vec<usize>),
 }
-pub struct SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
+pub struct SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {
   rng: &'a mut R,
-  values: &'a [U],
+  values: &'a [T],
   n: usize,
   data: SampleIterData,
 }
 
-impl<'a, R, U> SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
-  fn new(rng: &'a mut R, values: &'a [U], sample_size: usize) -> SampleIter<'a, R, U> {
+impl<'a, R, T> SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {
+  fn new(rng: &'a mut R, values: &'a [T], sample_size: usize) -> SampleIter<'a, R, T> {
     let set_size = values.len();
     if sample_size > set_size {
       panic!("Sample set smaller than requested sample size");
@@ -110,10 +110,10 @@ impl<'a, R, U> SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
   }
 }
 
-impl<'a, R, U> Iterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
-  type Item = &'a U;
+impl<'a, R, T> Iterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {
+  type Item = &'a T;
 
-  fn next(&mut self) -> Option<&'a U> {
+  fn next(&mut self) -> Option<&'a T> {
     if self.n == 0 {
       return None;
     }
@@ -143,7 +143,7 @@ impl<'a, R, U> Iterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {
   }
 }
 
-impl<'a, R, U> ExactSizeIterator for SampleIter<'a, R, U> where R: 'a + Rng, U: 'a {}
+impl<'a, R, T> ExactSizeIterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {}
 
 macro_rules! impl_rangable {
   ($ty: ty, $uty: ty) => (
