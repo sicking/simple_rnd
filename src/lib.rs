@@ -133,6 +133,31 @@ pub trait Rng {
     panic!("total_weight did not match up with sum of weights");
   }
 
+  fn choose_weighted2<ValIter, WeightIter, T, W>(&mut self, values: ValIter, weights: WeightIter) -> Option<T>
+    where ValIter: Iterator<Item=T>,
+          WeightIter: Iterator<Item=W> + Clone,
+          W: Rangeable + From<u8> + PartialOrd<W> + AddAssign<W> + std::fmt::Debug + Copy + std::iter::Sum<W> {
+
+    let total_weight: W = weights.clone().map(|x| { if x < W::from(0u8) { panic!("Negative weight") } x } ).sum();
+
+    if total_weight == W::from(0u8) {
+      return None;
+    }
+
+    let mut cumulative_weight = W::from(0u8);
+    let val = self.below(total_weight);
+
+    for (item, weight) in values.zip(weights) {
+      cumulative_weight += weight;
+
+      if cumulative_weight > val {
+        return Some(item);
+      }
+    }
+
+    panic!("total_weight did not match up with sum of weights");
+  }
+
   fn sample<'a, T>(&'a mut self, values: &'a [T], sample_size: usize) -> SampleIter<'a, Self, T> where Self: Sized {
     SampleIter::new(self, &values, sample_size)
   }
@@ -601,6 +626,39 @@ mod tests {
       // The non-debug-assertions code can't detect too small total_weight
       assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1)).is_err());
       assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1000)).is_err());
+    }
+  }
+
+  #[test]
+  fn test_choose_weighted2() {
+    let mut a = StdRng::new();
+    let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
+    let weights = vec![1u32, 2, 3, 0, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7];
+    let total_weight: u32 = weights.iter().sum();
+    assert_eq!(chars.len(), weights.len());
+
+    fn deref(x: &u32) -> u32 { *x }
+
+    let mut chosen = Vec::new();
+    chosen.resize(chars.len(), 0i32);
+    for _ in 0..10000 {
+      let picked = *a.choose_weighted2(chars.iter(), weights.iter().map(deref)).unwrap();
+      chosen[(picked as usize) - ('a' as usize)] += 1;
+    }
+    for (i, count) in chosen.iter().enumerate() {
+      let err = *count - ((weights[i] * 10000 / total_weight) as i32);
+      assert!(-150 <= err && err <= 150);
+    }
+
+    // Mutable items
+    chosen.truncate(0);
+    chosen.resize(weights.len(), 0);
+    for _ in 0..10000 {
+      *a.choose_weighted2(chosen.iter_mut(), weights.iter().map(deref)).unwrap() += 1;
+    }
+    for (i, count) in chosen.iter().enumerate() {
+      let err = *count - ((weights[i] * 10000 / total_weight) as i32);
+      assert!(-150 <= err && err <= 150);
     }
   }
 
