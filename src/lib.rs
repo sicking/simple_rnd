@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate lazy_static;
+extern crate core;
 
 use std::sync::Mutex;
 use std::collections::HashSet;
+use std::ops::AddAssign;
 
 lazy_static! {
   static ref GLOBAL_RNG: Mutex<XorShift128Plus> = Mutex::new(XorShift128Plus::new_seeded([4711, 17]));
@@ -14,6 +16,28 @@ pub trait Rangeable : Sized {
   fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
   fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: Self, end: Self) -> Self;
 }
+pub trait ToWeightedChoice : Sized {
+  type Item;
+  type Weight : Rangeable;
+  fn to_weighted_choice(self) -> (Self::Item, Self::Weight);
+}
+
+impl<'a, T, W> ToWeightedChoice for &'a(T, W) where W: Rangeable + Copy {
+  type Item = &'a T;
+  type Weight = W;
+  fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (&self.0, self.1) }
+}
+impl<'a, T, W> ToWeightedChoice for &'a mut (T, W) where W: Rangeable + Copy {
+  type Item = &'a mut T;
+  type Weight = W;
+  fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (&mut self.0, self.1) }
+}
+impl<'a, T, W> ToWeightedChoice for (T, &'a W) where W: Rangeable + Copy {
+  type Item = T;
+  type Weight = W;
+  fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (self.0, *self.1) }
+}
+
 
 pub trait Rng {
   fn gen_u32(&mut self) -> u32 {
@@ -40,7 +64,7 @@ pub trait Rng {
   fn zeroone(&mut self) -> f32 {
     let frac = self.gen_u32() & ((1 << 24) - 1);
     const EXP: u32 = 127u32 << 23;
-    unsafe { std::mem::transmute::<u32, f32>(frac | EXP) - 1.0 }
+    f32::from_bits(frac | EXP) - 1.0
   }
 
   fn shuffle<U>(&mut self, values: &mut [U]) {
@@ -70,6 +94,43 @@ pub trait Rng {
       let len = values.len();
       Some(&mut values[self.below(len)])
     }
+  }
+
+  fn choose_weighted<Iter, T, W, X>(&mut self, values: Iter, total_weight: W) -> Option<T>
+    where Iter: Iterator<Item=X>,
+          X: ToWeightedChoice<Item=T, Weight=W>,
+          W: Rangeable + From<u8> + PartialOrd<W> + AddAssign<W> + std::fmt::Debug + Copy {
+    if total_weight == W::from(0u8) {
+      return None;
+    }
+
+    let mut cumulative_weight = W::from(0u8);
+    let mut debug_result = None;
+    let val = self.below(total_weight);
+
+    for (item, weight) in values.map(|x| x.to_weighted_choice()) {
+      if weight < W::from(0u8) {
+        panic!("Negative weight");
+      }
+
+      cumulative_weight += weight;
+
+      if cumulative_weight > val {
+        if !cfg!(debug_assertions) {
+          return Some(item);
+        }
+        if debug_result.is_none() {
+          debug_result = Some(item);
+        }
+      }
+    }
+
+    debug_assert_eq!(total_weight, cumulative_weight);
+    if cfg!(debug_assertions) && debug_result.is_some() {
+      return debug_result;
+    }
+
+    panic!("total_weight did not match up with sum of weights");
   }
 
   fn sample<'a, T>(&'a mut self, values: &'a [T], sample_size: usize) -> SampleIter<'a, Self, T> where Self: Sized {
@@ -153,7 +214,7 @@ macro_rules! impl_rangable {
         if limit < 0 {
           panic!("Rng.below() called with limit < 0");
         }
-        if (limit as u32) < 429_496 { // 32bit max / 10000. I.e. bias is less than 0.01%
+        if (limit as u32) < (std::u32::MAX / 10000) { // I.e. bias is less than 0.01%
           (rng.gen_u32() % (limit as u32)) as $ty
         } else {
           (rng.gen_u64() % (limit as u64)) as $ty
@@ -167,6 +228,12 @@ macro_rules! impl_rangable {
         let diff = end.wrapping_sub(start) as $uty;
         (rng.below(diff) as $ty).wrapping_add(start)
       }
+    }
+
+    impl<T> ToWeightedChoice for (T, $ty) {
+      type Item = T;
+      type Weight = $ty;
+      fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { self }
     }
   )
 }
@@ -464,16 +531,76 @@ mod tests {
       assert!(-150 <= err && err <= 150);
     }
 
-
     chosen.truncate(0);
     chosen.resize(40, 0i32);
-
     for _ in 0..10000 {
       *a.choose_mut(&mut chosen).unwrap() += 1;
     }
     for count in chosen.iter() {
       let err = *count - (10000 / (chosen.len() as i32));
       assert!(-150 <= err && err <= 150);
+    }
+  }
+
+  #[test]
+  fn test_choose_weighted() {
+    let mut a = StdRng::new();
+    let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
+    let weights = vec![1u32, 2, 3, 0, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7];
+    let total_weight = weights.iter().sum();
+    assert_eq!(chars.len(), weights.len());
+
+    // Automatic dereferencing when weights are given as references
+    let mut chosen = Vec::new();
+    chosen.resize(chars.len(), 0i32);
+    for _ in 0..10000 {
+      let iter = chars.iter().zip(weights.iter());
+      let picked = *a.choose_weighted(iter, total_weight).unwrap();
+      chosen[(picked as usize) - ('a' as usize)] += 1;
+    }
+    for (i, count) in chosen.iter().enumerate() {
+      let err = *count - ((weights[i] * 10000 / total_weight) as i32);
+      assert!(-150 <= err && err <= 150);
+    }
+
+    // Mutable items
+    chosen.truncate(0);
+    chosen.resize(weights.len(), 0);
+    for _ in 0..10000 {
+      let iter = chosen.iter_mut().zip(weights.iter().map(|x| *x));
+      *a.choose_weighted(iter, total_weight).unwrap() += 1;
+    }
+    for (i, count) in chosen.iter().enumerate() {
+      let err = *count - ((weights[i] * 10000 / total_weight) as i32);
+      assert!(-150 <= err && err <= 150);
+    }
+
+    // Automatic dereferencing when iterating references of item+weight tuples
+    let mut weighted_items = weights.iter().rev().map(|x| (0i32, *x)).collect::<Vec<_>>();
+    for _ in 0..10000 {
+      *a.choose_weighted(weighted_items.iter_mut(), total_weight).unwrap() += 1;
+    }
+    for &(count, weight) in weighted_items.iter() {
+      let err = count - ((weight * 10000 / total_weight) as i32);
+      assert!(-150 <= err && err <= 150);
+    }
+
+    fn test_adjusted_weight_total(delta: i32) {
+      let items = vec![(1, 1), (2, 2), (3, 3)];
+      if cfg!(debug_assertions) || delta == 0 {
+        StdRng::new().choose_weighted(items.iter(), 6+delta);
+      } else {
+        loop { StdRng::new().choose_weighted(items.iter(), 6+delta); }
+      }
+    }
+
+    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(0)).is_ok());
+    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(1)).is_err());
+    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(1000)).is_err());
+    if cfg!(debug_assertions) {
+      // The non-debug-assertions code can't detect too small total_weight
+      assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1)).is_err());
+      assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1000)).is_err());
     }
   }
 
