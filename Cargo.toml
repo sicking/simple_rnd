@@ -3,5 +3,12 @@ name = "simple_rnd"
 version = "0.1.0"
 authors = ["Jonas Sicking <jonas@sicking.cc>"]
 
+[features]
+default = ["bigint"]
+bigint = ["num-bigint", "num-traits"]
+
 [dependencies]
 lazy_static = "1.0"
+
+num-bigint = { version = "0.1", optional = true }
+num-traits = { version = "0.2", optional = true }

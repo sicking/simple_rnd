@@ -1,9 +1,19 @@
 #[macro_use]
 extern crate lazy_static;
 
+#[cfg(feature = "bigint")]
+extern crate num_bigint;
+#[cfg(feature = "bigint")]
+extern crate num_traits;
+
 use std::sync::Mutex;
 use std::collections::HashSet;
 use std::ops::AddAssign;
+
+#[cfg(feature = "bigint")]
+use num_bigint::BigUint;
+#[cfg(feature = "bigint")]
+use num_traits::identities::Zero;
 
 lazy_static! {
   static ref GLOBAL_RNG: Mutex<XorShift128Plus> = Mutex::new(XorShift128Plus::new_seeded([4711, 17]));
@@ -166,6 +176,21 @@ pub trait Rng {
   fn sample<'a, T>(&'a mut self, values: &'a [T], sample_size: usize) -> SampleIter<'a, Self, T> where Self: Sized {
     SampleIter::new(self, &values, sample_size)
   }
+
+  #[cfg(feature = "bigint")]
+  fn gen_biguint(&mut self, bits: usize) -> BigUint {
+    let top_bits = bits % 32;
+    let words = bits / 32;
+    let mut data = Vec::with_capacity((words + 31) / 32);
+    for _ in 0..words {
+      data.push(self.gen_u32());
+    }
+    if top_bits > 0 {
+      data.push(self.gen_u32() >> (32 - top_bits));
+    }
+    BigUint::new(data)
+  }
+
 }
 
 enum SampleIterData {
@@ -302,6 +327,45 @@ impl_rangable!(u64, u64);
 impl_rangable!(i64, u64);
 impl_rangable!(usize, usize);
 impl_rangable!(isize, usize);
+
+
+#[cfg(feature = "bigint")]
+#[allow(unused_comparisons)]
+impl<'a> Rangeable for &'a BigUint {
+  type Output = BigUint;
+
+  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a BigUint) -> BigUint {
+    if limit.is_neg() || limit.is_zero() {
+      panic!("Rng.below() called with limit <= 0");
+    }
+
+    // This could be done faster if we accessed the inner words in the BigUint.
+    let bits = limit.bits();
+    loop {
+      let res = rng.gen_biguint(bits);
+      if res < *limit {
+        return res;
+      }
+    }
+  }
+
+  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a BigUint, end: &'a BigUint) -> BigUint {
+    if start >= end {
+      panic!("empty or inverted range");
+    }
+    let diff = end - start;
+    rng.below(&diff) + start
+  }
+
+  fn zero() -> Self::Output {
+    return BigUint::zero()
+  }
+
+  fn is_neg(&self) -> bool {
+    return false;
+  }
+}
+
 
 pub trait SeedFrom<T> {
   fn seed_from(T) -> Self;
@@ -777,5 +841,27 @@ mod tests {
         assert!(found.insert(val_ref));
       }
     }
+  }
+
+  #[cfg(feature = "bigint")]
+  #[test]
+  fn test_bigint() {
+    let mut a = StdRng::new();
+    for bits in [0usize, 1, 3, 5, 31, 32, 33, 50, 63, 64, 65, 1500].iter().cloned() {
+      let mut bitfield = BigUint::from_slice(&[0]);
+      for _ in 0..20 {
+        bitfield |= a.gen_biguint(bits);
+      }
+      assert_eq!(bitfield, (BigUint::from_slice(&[1]) << bits) - 1u32);
+    }
+
+    let lower = BigUint::from_slice(&[1, 1, 5]);
+    let upper = BigUint::from_slice(&[14, 1, 47, 12]);
+    for _ in 0..10000 {
+      let res = a.range(&lower, &upper);
+      assert!(lower <= res && res < upper);
+    }
+
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(&BigUint::from_slice(&[0]))).is_err());
   }
 }
