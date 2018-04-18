@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate lazy_static;
-extern crate core;
 
 use std::sync::Mutex;
 use std::collections::HashSet;
@@ -13,31 +12,33 @@ lazy_static! {
 pub type StdRng = XorShift64Star;
 
 pub trait Rangeable : Sized {
-  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self;
-  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: Self, end: Self) -> Self;
+  type Output;
+  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self::Output;
+  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: Self, end: Self) -> Self::Output;
+  fn zero() -> Self::Output;
+  fn is_neg(&self) -> bool;
 }
 pub trait ToWeightedChoice : Sized {
   type Item;
-  type Weight : Rangeable;
+  type Weight;
   fn to_weighted_choice(self) -> (Self::Item, Self::Weight);
 }
 
-impl<'a, T, W> ToWeightedChoice for &'a(T, W) where W: Rangeable + Copy {
+impl<'a, T, W> ToWeightedChoice for &'a(T, W) where W: Copy {
   type Item = &'a T;
   type Weight = W;
   fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (&self.0, self.1) }
 }
-impl<'a, T, W> ToWeightedChoice for &'a mut (T, W) where W: Rangeable + Copy {
+impl<'a, T, W> ToWeightedChoice for &'a mut (T, W) where W: Copy {
   type Item = &'a mut T;
   type Weight = W;
   fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (&mut self.0, self.1) }
 }
-impl<'a, T, W> ToWeightedChoice for (T, &'a W) where W: Rangeable + Copy {
+impl<T, W> ToWeightedChoice for (T, W) where W: Copy {
   type Item = T;
   type Weight = W;
-  fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { (self.0, *self.1) }
+  fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { self }
 }
-
 
 pub trait Rng {
   fn gen_u32(&mut self) -> u32 {
@@ -49,11 +50,11 @@ pub trait Rng {
     x << 32 | y
   }
 
-  fn below<T>(&mut self, limit: T) -> T where T: Rangeable {
+  fn below<T, O>(&mut self, limit: T) -> O where T: Rangeable<Output=O> {
     T::rng_below(self, limit)
   }
 
-  fn range<T>(&mut self, start: T, end: T) -> T where T: Rangeable {
+  fn range<T, O>(&mut self, start: T, end: T) -> O where T: Rangeable<Output=O> {
     T::rng_range(self, start, end)
   }
 
@@ -96,20 +97,23 @@ pub trait Rng {
     }
   }
 
-  fn choose_weighted<Iter, T, W, X>(&mut self, values: Iter, total_weight: W) -> Option<T>
-    where Iter: Iterator<Item=X>,
-          X: ToWeightedChoice<Item=T, Weight=W>,
-          W: Rangeable + From<u8> + PartialOrd<W> + AddAssign<W> + std::fmt::Debug + Copy {
-    if total_weight == W::from(0u8) {
+  fn choose_weighted<Iter, T, W, S>(&mut self, values: Iter, total_weight: S) -> Option<T>
+    where Iter: Iterator,
+          Iter::Item: ToWeightedChoice<Item=T, Weight=W>,
+          W: Rangeable,
+          S: Rangeable<Output=S> + AddAssign<W> + PartialOrd<S> + PartialEq<S> + std::fmt::Debug + Clone {
+            // S:Clone is only required by debug assertions
+    if total_weight == S::zero() {
       return None;
     }
 
-    let mut cumulative_weight = W::from(0u8);
+    let mut cumulative_weight = S::zero();
     let mut debug_result = None;
+    let debug_total_weight = if cfg!(debug_assertions) { Some(total_weight.clone()) } else { None };
     let val = self.below(total_weight);
 
     for (item, weight) in values.map(|x| x.to_weighted_choice()) {
-      if weight < W::from(0u8) {
+      if weight.is_neg() {
         panic!("Negative weight");
       }
 
@@ -125,7 +129,7 @@ pub trait Rng {
       }
     }
 
-    debug_assert_eq!(total_weight, cumulative_weight);
+    debug_assert_eq!(debug_total_weight.unwrap(), cumulative_weight);
     if cfg!(debug_assertions) && debug_result.is_some() {
       return debug_result;
     }
@@ -133,18 +137,19 @@ pub trait Rng {
     panic!("total_weight did not match up with sum of weights");
   }
 
-  fn choose_weighted2<ValIter, WeightIter, T, W>(&mut self, values: ValIter, weights: WeightIter) -> Option<T>
+  fn choose_weighted2<ValIter, WeightIter, T, W, S>(&mut self, values: ValIter, weights: WeightIter) -> Option<T>
     where ValIter: Iterator<Item=T>,
           WeightIter: Iterator<Item=W> + Clone,
-          W: Rangeable + From<u8> + PartialOrd<W> + AddAssign<W> + std::fmt::Debug + Copy + std::iter::Sum<W> {
+          W: std::ops::Add<W, Output=S> + Rangeable,
+          S: std::iter::Sum<W> + Rangeable<Output=S> + AddAssign<W> + PartialOrd<S> {
 
-    let total_weight: W = weights.clone().map(|x| { if x < W::from(0u8) { panic!("Negative weight") } x } ).sum();
+    let total_weight: S = weights.clone().map(|w| { if w.is_neg() { panic!("Negative weight"); } w }).sum();
 
-    if total_weight == W::from(0u8) {
+    if total_weight == S::zero() {
       return None;
     }
 
-    let mut cumulative_weight = W::from(0u8);
+    let mut cumulative_weight = S::zero();
     let val = self.below(total_weight);
 
     for (item, weight) in values.zip(weights) {
@@ -155,7 +160,7 @@ pub trait Rng {
       }
     }
 
-    panic!("total_weight did not match up with sum of weights");
+    panic!("clone weight did not match up with sum of weights");
   }
 
   fn sample<'a, T>(&'a mut self, values: &'a [T], sample_size: usize) -> SampleIter<'a, Self, T> where Self: Sized {
@@ -235,8 +240,10 @@ macro_rules! impl_rangable {
   ($ty: ty, $uty: ty) => (
     #[allow(unused_comparisons)]
     impl Rangeable for $ty {
+      type Output = $ty;
+
       fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
-        if limit < 0 {
+        if limit.is_neg() {
           panic!("Rng.below() called with limit < 0");
         }
         if (limit as u32) < (std::u32::MAX / 10000) { // I.e. bias is less than 0.01%
@@ -253,12 +260,35 @@ macro_rules! impl_rangable {
         let diff = end.wrapping_sub(start) as $uty;
         (rng.below(diff) as $ty).wrapping_add(start)
       }
+
+      fn zero() -> Self::Output {
+        return 0;
+      }
+
+      fn is_neg(&self) -> bool {
+        return *self < 0;
+      }
     }
 
-    impl<T> ToWeightedChoice for (T, $ty) {
-      type Item = T;
-      type Weight = $ty;
-      fn to_weighted_choice(self) -> (Self::Item, Self::Weight) { self }
+    #[allow(unused_comparisons)]
+    impl<'a> Rangeable for &'a $ty {
+      type Output = $ty;
+
+      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a $ty) -> $ty {
+        <$ty>::rng_below(rng, *limit)
+      }
+
+      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a $ty, end: &'a $ty) -> $ty {
+        <$ty>::rng_range(rng, *start, *end)
+      }
+
+      fn zero() -> Self::Output {
+        return 0;
+      }
+
+      fn is_neg(&self) -> bool {
+        return **self < 0;
+      }
     }
   )
 }
@@ -452,23 +482,6 @@ mod tests {
     assert!(260 <= count && count <= 380);
   }
 
-  /*
-  For now I have not figured out how to make this work due to the type parameters in
-  several functions.
-  #[test]
-  fn test_trait_obj() {
-    fn my_func(r: &mut Rng) {
-      r.gen_u32();
-      r.gen_u64();
-      r.below(5);
-      r.chance(1, 10);
-    }
-
-    let mut a = StdRng::new();
-    my_func(&mut a);
-  }
-  */
-
   #[test]
   fn test_seed_from() {
     XorShift128Plus::new_seeded([1u64, 2u64]);
@@ -572,7 +585,7 @@ mod tests {
     let mut a = StdRng::new();
     let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
     let weights = vec![1u32, 2, 3, 0, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7];
-    let total_weight = weights.iter().sum();
+    let total_weight : u32 = weights.iter().sum();
     assert_eq!(chars.len(), weights.len());
 
     // Automatic dereferencing when weights are given as references
@@ -637,12 +650,10 @@ mod tests {
     let total_weight: u32 = weights.iter().sum();
     assert_eq!(chars.len(), weights.len());
 
-    fn deref(x: &u32) -> u32 { *x }
-
     let mut chosen = Vec::new();
     chosen.resize(chars.len(), 0i32);
     for _ in 0..10000 {
-      let picked = *a.choose_weighted2(chars.iter(), weights.iter().map(deref)).unwrap();
+      let picked = *a.choose_weighted2(chars.iter(), weights.iter()).unwrap();
       chosen[(picked as usize) - ('a' as usize)] += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
@@ -654,7 +665,7 @@ mod tests {
     chosen.truncate(0);
     chosen.resize(weights.len(), 0);
     for _ in 0..10000 {
-      *a.choose_weighted2(chosen.iter_mut(), weights.iter().map(deref)).unwrap() += 1;
+      *a.choose_weighted2(chosen.iter_mut(), weights.iter()).unwrap() += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
       let err = *count - ((weights[i] * 10000 / total_weight) as i32);
@@ -696,10 +707,16 @@ mod tests {
     assert_eq!(a.range(1u64, 2), 1);
     assert_eq!(a.range(-2isize, -1), -2);
     assert_eq!(a.range(1usize, 2), 1);
+    assert_eq!(a.range(&-2i32, &-1), -2);
+    assert_eq!(a.range(&1u32, &2), 1);
+    assert_eq!(a.range(&-2i64, &-1), -2);
+    assert_eq!(a.range(&1u64, &2), 1);
 
     for _ in 0..10000 {
       let x = a.range(-120i8, 120);
       assert!(-120 <= x && x < 120);
+      let x = a.range(&-110i8, &110);
+      assert!(-110 <= x && x < 110);
     }
 
     let x = a.range(-120i8, 120);
@@ -718,6 +735,10 @@ mod tests {
     assert!(std::panic::catch_unwind(|| StdRng::new().below(-100i8)).is_err());
     assert!(std::panic::catch_unwind(|| StdRng::new().range(2, 1)).is_err());
     assert!(std::panic::catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(&0u32)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(&-100i8)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
   }
 
   #[test]
