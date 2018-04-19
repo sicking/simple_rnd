@@ -4,8 +4,9 @@ version = "0.1.0"
 authors = ["Jonas Sicking <jonas@sicking.cc>"]
 
 [features]
-default = ["bigint"]
+default = ["bigint", "float"]
 bigint = ["num-bigint", "num-traits"]
+float = ["bigint"]
 
 [dependencies]
 lazy_static = "1.0"
