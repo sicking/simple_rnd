@@ -24,6 +24,9 @@ pub trait Rangeable : Sized {
   fn zero() -> Self::Output;
   fn is_neg(&self) -> bool;
 }
+pub trait ZeroOneable : Sized {
+  fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> Self;
+}
 pub trait ToWeightedChoice : Sized {
   type Item;
   type Weight;
@@ -68,10 +71,8 @@ pub trait Rng {
     self.below(denom) < num
   }
 
-  fn zeroone(&mut self) -> f32 {
-    let frac = self.gen_u32() & ((1 << 24) - 1);
-    const EXP: u32 = 127u32 << 23;
-    f32::from_bits(frac | EXP) - 1.0
+  fn zeroone<T: ZeroOneable>(&mut self) -> T {
+    T::rng_zeroone(self)
   }
 
   fn shuffle<U>(&mut self, values: &mut [U]) {
@@ -313,6 +314,21 @@ macro_rules! impl_rangable {
     }
   )
 }
+
+macro_rules! impl_zerooneable {
+  ($ty: ty, $mantissa_bits: expr, $gen_func: ident, $exp_bias: expr) => (
+    impl ZeroOneable for $ty {
+      fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $ty {
+        let frac = rng.$gen_func() & ((1 << $mantissa_bits) - 1);
+        let exp = $exp_bias << $mantissa_bits;
+        <$ty>::from_bits(frac | exp) - 1.0
+      }
+    }
+  )
+}
+
+impl_zerooneable!(f32, 23, gen_u32, 127);
+impl_zerooneable!(f64, 52, gen_u64, 1023);
 impl_rangable!(u8, u8);
 impl_rangable!(i8, u8);
 impl_rangable!(u16, u16);
@@ -549,15 +565,24 @@ mod tests {
   fn test_zeroone() {
     let mut a = StdRng::new();
     for _ in 0..5000 {
-      let v = a.zeroone();
+      let v = a.zeroone::<f32>();
       assert!(0.0 <= v && v < 1.0);
     }
     let mut t = TestRng::new(0);
-    assert!(t.zeroone() == 0.0);
+    assert!(t.zeroone::<f32>() == 0.0);
     t.x = 0xffff_ffff;
-    assert!(t.zeroone() > 0.0);
-    assert!(t.zeroone() < 1.0);
-    assert!(t.zeroone() > 0.999);
+    assert!(t.zeroone::<f32>() > 0.999);
+    assert!(t.zeroone::<f32>() < 1.0);
+
+    for _ in 0..5000 {
+      let v = a.zeroone::<f64>();
+      assert!(0.0 <= v && v < 1.0);
+    }
+    let mut t = TestRng::new(0);
+    assert!(t.zeroone::<f64>() == 0.0);
+    t.x = 0xffff_ffff;
+    assert!(t.zeroone::<f64>() > 0.999);
+    assert!(t.zeroone::<f64>() < 1.0);
   }
 
   #[test]
