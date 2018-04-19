@@ -400,6 +400,7 @@ impl<T, W> ToWeightedChoice for (T, W) where W: Copy {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::panic::catch_unwind;
 
   #[test]
   fn test_below() {
@@ -563,13 +564,13 @@ mod tests {
       }
     }
 
-    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(0)).is_ok());
-    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(1)).is_err());
-    assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(1000)).is_err());
+    assert!(catch_unwind(|| test_adjusted_weight_total(0)).is_ok());
+    assert!(catch_unwind(|| test_adjusted_weight_total(1)).is_err());
+    assert!(catch_unwind(|| test_adjusted_weight_total(1000)).is_err());
     if cfg!(debug_assertions) {
       // The non-debug-assertions code can't detect too small total_weight
-      assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1)).is_err());
-      assert!(std::panic::catch_unwind(|| test_adjusted_weight_total(-1000)).is_err());
+      assert!(catch_unwind(|| test_adjusted_weight_total(-1)).is_err());
+      assert!(catch_unwind(|| test_adjusted_weight_total(-1000)).is_err());
     }
   }
 
@@ -617,7 +618,7 @@ mod tests {
     assert_eq!(a.below(1u64), 0);
     assert_eq!(a.below(1isize), 0);
     assert_eq!(a.below(1usize), 0);
-    assert!(std::panic::catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
+    assert!(catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
     let mut t = TestRng::new_fail64(0);
     t.below(std::u16::MAX);
     t.below(std::i16::MAX);
@@ -662,14 +663,14 @@ mod tests {
 
   #[test]
   fn test_below_panics() {
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(0u32)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(-100i8)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(2, 1)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(&0u32)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(&-100i8)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(0u32)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(-100i8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(2, 1)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&0u32)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&-100i8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
   }
 
   #[test]
@@ -726,8 +727,8 @@ mod tests {
       assert!(-*val <= x && x < *val);
     }
 
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f64::NAN)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f64::INFINITY)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(std::f64::NAN)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(std::f64::INFINITY)).is_err());
 
     for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter() {
       for _ in 0..1000 {
@@ -742,8 +743,7 @@ mod tests {
       assert!(-*val <= x && x < *val);
     }
 
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f32::NAN)).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f32::INFINITY)).is_err());
-
+    assert!(catch_unwind(|| StdRng::new().below(std::f32::NAN)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(std::f32::INFINITY)).is_err());
   }
 }

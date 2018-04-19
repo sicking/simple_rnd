@@ -83,7 +83,7 @@ impl<'a> Rangeable for &'a BigInt {
 mod tests {
   use super::*;
   use super::super::StdRng;
-  use std;
+  use std::panic::catch_unwind;
 
   #[cfg(feature = "bigint")]
   #[test]
@@ -135,12 +135,12 @@ mod tests {
     assert!(has_positive);
     assert!(has_negative);
 
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(&BigUint::from(0u32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(&BigInt::from(0u32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().below(&BigInt::from(-1i32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&BigUint::from(5u32), &BigUint::from(5u32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&BigUint::from(50u32), &BigUint::from(5u32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&BigInt::from(-5i32), &BigInt::from(-5i32))).is_err());
-    assert!(std::panic::catch_unwind(|| StdRng::new().range(&BigInt::from(50u32), &BigInt::from(-5i32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&BigUint::from(0u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&BigInt::from(0u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&BigInt::from(-1i32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&BigUint::from(5u32), &BigUint::from(5u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&BigUint::from(50u32), &BigUint::from(5u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&BigInt::from(-5i32), &BigInt::from(-5i32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&BigInt::from(50u32), &BigInt::from(-5i32))).is_err());
   }
 }
