@@ -304,12 +304,74 @@ impl_rangable!(i64, u64);
 impl_rangable!(usize, usize);
 impl_rangable!(isize, usize);
 
+macro_rules! impl_float_rangable {
+  ($ty: ty, $significand_bits: expr, $exp_bits: expr, $gen_func: ident) => (
+    impl Rangeable for $ty {
+      type Output = $ty;
+
+      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
+        Self::rng_range(rng, 0.0, limit)
+      }
+
+      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
+        let start_exp = (start.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
+        let end_exp = (end.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
+        if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
+          panic!("Overflow or NaN");
+        }
+
+        let scale = end - start;
+        let offset = start - scale;
+        assert!(scale.is_finite() && offset.is_finite() && start.is_finite() && end.is_finite());
+        let exp = ((1 << ($exp_bits - 1)) - 1) << $significand_bits;
+        loop {
+          let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
+          let res = <$ty>::from_bits(frac | exp) * scale + offset;
+          // Check for rounding errors
+          if res >= start && res < end {
+            return res
+          }
+        }
+      }
+
+      fn zero() -> Self::Output {
+        return 0.0
+      }
+
+      fn is_neg(&self) -> bool {
+        return *self < 0.0;
+      }
+    }
+    impl<'a> Rangeable for &'a $ty {
+      type Output = $ty;
+
+      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a $ty) -> $ty {
+        <$ty>::rng_below(rng, *limit)
+      }
+
+      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a $ty, end: &'a $ty) -> $ty {
+        <$ty>::rng_range(rng, *start, *end)
+      }
+
+      fn zero() -> Self::Output {
+        return 0.0;
+      }
+
+      fn is_neg(&self) -> bool {
+        return **self < 0.0;
+      }
+    }
+  )
+}
+impl_float_rangable!(f64, 52, 11, gen_u64);
+impl_float_rangable!(f32, 23, 8, gen_u32);
+
 macro_rules! impl_zerooneable {
-  ($ty: ty, $mantissa_bits: expr, $gen_func: ident, $exp_bias: expr) => (
+  ($ty: ty, $significand_bits: expr, $gen_func: ident, $exp_bias: expr) => (
     impl ZeroOneable for $ty {
       fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $ty {
-        let frac = rng.$gen_func() & ((1 << $mantissa_bits) - 1);
-        let exp = $exp_bias << $mantissa_bits;
+        let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
+        let exp = $exp_bias << $significand_bits;
         <$ty>::from_bits(frac | exp) - 1.0
       }
     }
@@ -347,7 +409,7 @@ mod tests {
       counts[a.below(47usize)] += 1;
     }
     for count in counts.iter() {
-      assert!(50 <= *count && *count <= 150);
+      assert!(60 <= *count && *count <= 140);
     }
   }
 
@@ -646,5 +708,42 @@ mod tests {
         assert!(found.insert(val_ref));
       }
     }
+  }
+
+  #[test]
+  fn test_float() {
+    let mut a = StdRng::new();
+    for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter() {
+      for _ in 0..1000 {
+        let x = a.below(*val);
+        assert!(0.0 <= x && x < *val);
+        let x = a.range(-*val, *val);
+        assert!(-*val <= x && x < *val);
+      }
+      let x = a.below(val);
+      assert!(0.0 <= x && x < *val);
+      let x = a.range(&(-*val), val);
+      assert!(-*val <= x && x < *val);
+    }
+
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f64::NAN)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f64::INFINITY)).is_err());
+
+    for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter() {
+      for _ in 0..1000 {
+        let x = a.below(*val);
+        assert!(0.0 <= x && x < *val);
+        let x = a.range(-*val, *val);
+        assert!(-*val <= x && x < *val);
+      }
+      let x = a.below(val);
+      assert!(0.0 <= x && x < *val);
+      let x = a.range(&(-*val), val);
+      assert!(-*val <= x && x < *val);
+    }
+
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f32::NAN)).is_err());
+    assert!(std::panic::catch_unwind(|| StdRng::new().below(std::f32::INFINITY)).is_err());
+
   }
 }
