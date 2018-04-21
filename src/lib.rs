@@ -167,6 +167,18 @@ pub trait Rng {
     BigUint::new(data)
   }
 
+  #[cfg(test)]
+  fn test_gen_u32(&mut self, _limit: u32) -> u32 {
+    self.gen_u32()
+  }
+  #[cfg(test)]
+  fn test_gen_u64(&mut self, _limit: u64) -> u64 {
+    self.gen_u64()
+  }
+  #[cfg(all(test, feature = "bigint"))]
+  fn test_gen_biguint(&mut self, bits: usize, _limit: &BigUint) -> BigUint {
+    self.gen_biguint(bits)
+  }
 }
 
 enum SampleIterData {
@@ -237,6 +249,23 @@ impl<'a, R, T> Iterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {
 
 impl<'a, R, T> ExactSizeIterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {}
 
+#[cfg(not(test))]
+macro_rules! call_gen_32 {
+  ($rng: ident, $limit: expr) => ($rng.gen_u32())
+}
+#[cfg(test)]
+macro_rules! call_gen_32 {
+  ($rng: ident, $limit: expr) => ($rng.test_gen_u32($limit))
+}
+#[cfg(not(test))]
+macro_rules! call_gen_64 {
+  ($rng: ident, $limit: expr) => ($rng.gen_u64())
+}
+#[cfg(test)]
+macro_rules! call_gen_64 {
+  ($rng: ident, $limit: expr) => ($rng.test_gen_u64($limit))
+}
+
 macro_rules! impl_rangable {
   ($ty: ty, $uty: ty) => (
     #[allow(unused_comparisons)]
@@ -248,9 +277,9 @@ macro_rules! impl_rangable {
           panic!("Rng.below() called with limit < 0");
         }
         if (limit as u32) < (std::u32::MAX / 10000) { // I.e. bias is less than 0.01%
-          (rng.gen_u32() % (limit as u32)) as $ty
+          (call_gen_32!(rng, limit as u32) % (limit as u32)) as $ty
         } else {
-          (rng.gen_u64() % (limit as u64)) as $ty
+          (call_gen_64!(rng, limit as u64) % (limit as u64)) as $ty
         }
       }
 
@@ -429,10 +458,12 @@ mod tests {
   struct TestRng {
     x: u32,
     fail64: bool,
+    max: bool,
   }
   impl TestRng {
-    fn new(x: u32) -> Self { TestRng { x, fail64: false } }
-    fn new_fail64(x: u32) -> Self { TestRng { x, fail64: true } }
+    fn new(x: u32) -> Self { TestRng { x, fail64: false, max: false } }
+    fn new_fail64(x: u32) -> Self { TestRng { x, fail64: true, max: false } }
+    fn new_max() -> Self { TestRng { x: 0, fail64: false, max: true } }
   }
   impl Rng for TestRng {
     fn gen_u32(&mut self) -> u32 {
@@ -443,6 +474,20 @@ mod tests {
         panic!("gen_u64 called");
       }
       ((self.x as u64) << 32) | (self.x as u64)
+    }
+    fn test_gen_u32(&mut self, limit: u32) -> u32 {
+      if self.max {
+        limit - 1
+      } else {
+        self.gen_u32()
+      }
+    }
+    fn test_gen_u64(&mut self, limit: u64) -> u64 {
+      if self.max {
+        limit - 1
+      } else {
+        self.gen_u64()
+      }
     }
   }
 
@@ -555,6 +600,14 @@ mod tests {
       assert!(-150 <= err && err <= 150);
     }
 
+    // Choose last item
+    let mut test_rng = TestRng::new_max();
+    for _ in 0..3 {
+      assert_eq!(*test_rng.choose_weighted(chars.iter().zip(weights.iter()),
+                                           total_weight).unwrap(),
+                 'n');
+    }
+
     fn test_adjusted_weight_total(delta: i32) {
       let items = vec![(1, 1), (2, 2), (3, 3)];
       if cfg!(debug_assertions) || delta == 0 {
@@ -602,6 +655,13 @@ mod tests {
     for (i, count) in chosen.iter().enumerate() {
       let err = *count - ((weights[i] * 10000 / total_weight) as i32);
       assert!(-150 <= err && err <= 150);
+    }
+
+    // Choose last item
+    let mut test_rng = TestRng::new_max();
+    for _ in 0..3 {
+      assert_eq!(test_rng.choose_weighted2(chars.iter().cloned(), weights.iter()).unwrap(),
+                 'n');
     }
   }
 

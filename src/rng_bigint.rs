@@ -6,6 +6,15 @@ use super::{ Rng, Rangeable };
 use self::num_traits::Zero;
 use self::num_traits::Signed;
 
+#[cfg(not(test))]
+macro_rules! call_gen_biguint {
+  ($rng: ident, $bits: expr, $limit: expr) => ($rng.gen_biguint($bits))
+}
+#[cfg(test)]
+macro_rules! call_gen_biguint {
+  ($rng: ident, $bits: expr, $limit: expr) => ($rng.test_gen_biguint($bits, $limit))
+}
+
 impl<'a> Rangeable for &'a BigUint {
   type Output = BigUint;
 
@@ -17,7 +26,7 @@ impl<'a> Rangeable for &'a BigUint {
     // This could be done faster if we accessed the inner words in the BigUint.
     let bits = limit.bits();
     loop {
-      let res = rng.gen_biguint(bits);
+      let res = call_gen_biguint!(rng, bits, limit);
       if res < *limit {
         return res;
       }
