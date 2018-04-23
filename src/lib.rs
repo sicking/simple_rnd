@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate lazy_static;
 
+#[cfg(feature = "exact-floats")]
+mod rng_float;
+
 mod generators;
 pub use generators::{ SeedFrom, XorShift128Plus, XorShift64Star, StdRng };
 
@@ -343,6 +346,9 @@ macro_rules! impl_float_rangable {
       }
 
       fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
+        if start >= end {
+          panic!("empty or inverted range");
+        }
         let start_exp = (start.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
         let end_exp = (end.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
         if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
@@ -351,7 +357,7 @@ macro_rules! impl_float_rangable {
 
         let scale = end - start;
         let offset = start - scale;
-        assert!(scale.is_finite() && offset.is_finite() && start.is_finite() && end.is_finite());
+        assert!(scale.is_finite() && offset.is_finite());
         let exp = ((1 << ($exp_bits - 1)) - 1) << $significand_bits;
         loop {
           let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
@@ -392,6 +398,8 @@ macro_rules! impl_float_rangable {
     }
   )
 }
+
+#[cfg(not(feature = "exact-floats"))]
 impl_float_rangable!(f64, 52, 11, gen_u64);
 impl_float_rangable!(f32, 23, 8, gen_u32);
 
@@ -774,33 +782,45 @@ mod tests {
   #[test]
   fn test_float() {
     let mut a = StdRng::new();
-    for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter() {
+    for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter().cloned() {
       for _ in 0..1000 {
-        let x = a.below(*val);
-        assert!(0.0 <= x && x < *val);
-        let x = a.range(-*val, *val);
-        assert!(-*val <= x && x < *val);
+        let x = a.below(val);
+        assert!(0.0 <= x && x < val);
+        let x = a.range(-val, val);
+        assert!(-val <= x && x < val);
+        if val - 1.0 != val {
+          let x = a.range(val - 1.0, val);
+          assert!(val - 1.0 <= x && x < val);
+          let x = a.range(-val - 1.0, -val);
+          assert!(-val - 1.0 <= x && x < -val);
+        }
       }
-      let x = a.below(val);
-      assert!(0.0 <= x && x < *val);
-      let x = a.range(&(-*val), val);
-      assert!(-*val <= x && x < *val);
+      let x = a.below(&val);
+      assert!(0.0 <= x && x < val);
+      let x = a.range(&-val, &val);
+      assert!(-val <= x && x < val);
     }
 
     assert!(catch_unwind(|| StdRng::new().below(std::f64::NAN)).is_err());
     assert!(catch_unwind(|| StdRng::new().below(std::f64::INFINITY)).is_err());
 
-    for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter() {
+    for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter().cloned() {
       for _ in 0..1000 {
-        let x = a.below(*val);
-        assert!(0.0 <= x && x < *val);
-        let x = a.range(-*val, *val);
-        assert!(-*val <= x && x < *val);
+        let x = a.below(val);
+        assert!(0.0 <= x && x < val);
+        let x = a.range(-val, val);
+        assert!(-val <= x && x < val);
+        if val - 1.0 != val {
+          let x = a.range(val - 1.0, val);
+          assert!(val - 1.0 <= x && x < val);
+          let x = a.range(-val - 1.0, -val);
+          assert!(-val - 1.0 <= x && x < -val);
+        }
       }
-      let x = a.below(val);
-      assert!(0.0 <= x && x < *val);
-      let x = a.range(&(-*val), val);
-      assert!(-*val <= x && x < *val);
+      let x = a.below(&val);
+      assert!(0.0 <= x && x < val);
+      let x = a.range(&-val, &val);
+      assert!(-val <= x && x < val);
     }
 
     assert!(catch_unwind(|| StdRng::new().below(std::f32::NAN)).is_err());

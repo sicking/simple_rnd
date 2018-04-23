@@ -63,7 +63,7 @@ impl<'a> Rangeable for &'a BigInt {
     // inner BigUint.
     let bits = limit.bits();
     loop {
-      let res = BigInt::from_biguint(Sign::Plus, rng.gen_biguint(bits));
+      let res = BigInt::from_biguint(Sign::Plus, call_gen_biguint!(rng, bits, &limit.to_biguint().unwrap()));
       if res < *limit {
         return res;
       }
