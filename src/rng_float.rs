@@ -33,6 +33,15 @@ fn parse_float(val: f64) -> (BigInt, usize) {
    exp)
 }
 
+trait UnsignedInt {
+  fn bits(&self) -> usize;
+}
+impl UnsignedInt for u64 {
+  fn bits(&self) -> usize {
+    (64 - self.leading_zeros()) as usize
+  }
+}
+
 impl Rangeable for f64 {
   type Output = f64;
 
@@ -59,35 +68,38 @@ impl Rangeable for f64 {
       res_exp = start_parsed_exp;
     }
 
-    let mut signed_res = rng.range(&start_parsed, &end_parsed);
+    let mut res_bigint = rng.range(&start_parsed, &end_parsed);
 
-    let is_neg = signed_res.is_negative();
+    let is_neg = res_bigint.is_negative();
     if is_neg {
-      signed_res = -signed_res;
+      res_bigint = -res_bigint;
     }
-    let mut res = signed_res.to_biguint().unwrap();
-
-    let mut len = res.bits();
+    let mut res: u64;
+    let mut len = res_bigint.bits();
     if len > 53 {
-      // Make sure that res doesn't have too many significan digits
+      // Make sure that res_biguint doesn't have too many significan digits
+      let mut res_biguint = res_bigint.to_biguint().unwrap();
+      drop(res_bigint); // drop to prevent accidental use
       while len > 53 {
         let extra = len - 53;
-        let round_down = is_neg && (&res & ((BigUint::from(1u32) << extra) - 1u32)) != Zero::zero();
-        res >>= extra;
+        let round_down = is_neg && (&res_biguint & ((BigUint::from(1u32) << extra) - 1u32)) != Zero::zero();
+        res_biguint >>= extra;
         res_exp += extra;
         assert!(res_exp <= 2046);
         if round_down {
           // Round towards negative infinity.
-          res += 1u32;
+          res_biguint += 1u32;
         }
-        assert!(res.bits() == 53 || (res.bits() == 54 && round_down));
-        len = res.bits();
+        assert!(res_biguint.bits() == 53 || (res_biguint.bits() == 54 && round_down));
+        len = res_biguint.bits();
       }
+      res = res_biguint.to_u64().unwrap();
     } else {
       // Make sure that res has enough significant digits
+      res = res_bigint.to_u64().unwrap();
       while len < 53 && res_exp > 1 {
         let additional = min(53 - len, res_exp - 1);
-        let additional_bits = rng.gen_biguint(additional);
+        let additional_bits = rng.gen_u64() & ((1u64 << additional) - 1);
         res <<= additional;
         if !is_neg {
           res |= additional_bits;
@@ -103,10 +115,12 @@ impl Rangeable for f64 {
       // the end, which if it's a zero will prevent rounding from getting us back to the
       // original value.
       // Make sure not to run this if the orignal bit-length was over 53 bits and we've already
-      // rounded to get to this result
-      if is_neg && res == BigUint::from(0x0010_0000_0000_0000u64) && res_exp > 1 &&
-          rng.gen_biguint(1) == BigUint::from(1u32) {
-        res = BigUint::from(0x001f_ffff_ffff_ffffu64);
+      // rounded to get to this result.
+      // Use !rng.chance() to fit better with testing code below, which expects that generating
+      // high numbers from the rng, results in a value closer to the end of the range.
+      if is_neg && res == 0x0010_0000_0000_0000u64 && res_exp > 1 &&
+         !rng.chance(1, 2) {
+        res = 0x001f_ffff_ffff_ffffu64;
         res_exp -= 1;
       }
     }
@@ -114,17 +128,16 @@ impl Rangeable for f64 {
 
     // Convert to u64 and then f64
     assert!(res.bits() == 53 || (res_exp == 1 && res.bits() < 53));
-    let mut bits = res.to_u64().unwrap();
-    if (bits & (1 << 52)) == 0 {
+    if (res & (1 << 52)) == 0 {
       assert_eq!(res_exp, 1);
       res_exp = 0;
     }
-    bits &= !(1 << 52);
-    bits |= (res_exp as u64) << 52;
+    res &= !(1 << 52);
+    res |= (res_exp as u64) << 52;
     if is_neg {
-      bits |= 1 << 63;
+      res |= 1 << 63;
     }
-    f64::from_bits(bits)
+    f64::from_bits(res)
   }
 
   fn zero() -> Self::Output {
@@ -161,22 +174,28 @@ mod tests {
   use super::*;
 
   struct TestRng {
-    bigints: Vec<Option<BigUint>>,
-    bigint_repeat: Option<BigUint>,
+    vals: Vec<Option<u64>>,
+    repeat: Option<u64>,
   }
   impl Rng for TestRng {
-    fn gen_u32(&mut self) -> u32 { panic!("") }
-    fn gen_u64(&mut self) -> u64 { panic!("") }
-
-    fn gen_biguint(&mut self, bits: usize) -> BigUint {
-      self.test_gen_biguint(bits, &(BigUint::one() << bits))
+    fn gen_u64(&mut self) -> u64 { self.test_gen_u64(0) }
+    fn test_gen_u32(&mut self, limit: u32) -> u32 { self.test_gen_u64(limit as u64) as u32 }
+    fn test_gen_u64(&mut self, limit: u64) -> u64 {
+      match (self.repeat, self.vals.pop()) {
+        (_, Some(Some(val))) => val,
+        (_, Some(None)) => limit.wrapping_sub(1),
+        (Some(repeat), None) => repeat,
+        (None, None) => limit.wrapping_sub(1),
+      }
     }
 
+    fn gen_biguint(&mut self, _bits: usize) -> BigUint { panic!(""); }
+
     fn test_gen_biguint(&mut self, _bits: usize, limit: &BigUint) -> BigUint {
-      match (self.bigint_repeat.clone(), self.bigints.pop().clone()) {
-        (_, Some(Some(bigint))) => bigint,
+      match (self.repeat, self.vals.pop()) {
+        (_, Some(Some(val))) => BigUint::from(val),
         (_, Some(None)) => limit - BigUint::one(),
-        (Some(repeat), None) => repeat.clone(),
+        (Some(repeat), None) => BigUint::from(repeat),
         (None, None) => limit - BigUint::one(),
       }
     }
@@ -211,14 +230,14 @@ mod tests {
     for a in vals.iter().cloned() {
       for b in vals.iter().cloned().filter(|&b| b > a) {
 
-        let mut rng = TestRng { bigints: vec![], bigint_repeat: Some(Zero::zero()) };
+        let mut rng = TestRng { vals: vec![], repeat: Some(0) };
         assert_eq!(rng.range(a, b), a);
 
-        let mut rng = TestRng { bigints: vec![Some(BigUint::one())], bigint_repeat: Some(Zero::zero()) };
+        let mut rng = TestRng { vals: vec![Some(1)], repeat: Some(0) };
         let res = rng.range(a, b);
         assert!(a <= res && res < b);
 
-        let mut rng = TestRng { bigints: vec![], bigint_repeat: None };
+        let mut rng = TestRng { vals: vec![], repeat: None };
         let res = rng.range(a, b);
         if b > 0.0 {
           assert_eq!(res, f64::from_bits(b.to_bits() - 1));
