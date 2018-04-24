@@ -1,7 +1,7 @@
 extern crate num_bigint;
 extern crate num_traits;
 
-use std::{ f64, f32 };
+use std::{ self, f64, f32 };
 use super::{ Rng, Rangeable, ZeroOneable };
 
 #[cfg(feature = "exact-floats")]
@@ -28,6 +28,15 @@ impl UnsignedInt for u32 {
   }
 }
 
+fn bitmask<T, S>(bits: S) -> T
+  where T: std::ops::Shl<S, Output=T> + std::ops::Sub<T, Output=T> + From<u8> {
+  (T::from(1u8) << bits) - T::from(1u8)
+}
+fn mask<T, S>(val: T, bits: S) -> T
+  where T: std::ops::Shl<S, Output=T> + std::ops::Sub<T, Output=T> + std::ops::BitAnd<T, Output=T> + From<u8> {
+  val & bitmask(bits)
+}
+
 macro_rules! impl_float {
   ($fty: ty, $uty: ty, $mantissa_bits: expr, $exp_bits: expr, $gen_func: ident) => (
     impl Rangeable for $fty {
@@ -48,18 +57,18 @@ macro_rules! impl_float {
         if start >= end {
           panic!("empty or inverted range");
         }
-        let start_exp = (start.to_bits() >> $mantissa_bits) & ((1 << $exp_bits) - 1);
-        let end_exp = (end.to_bits() >> $mantissa_bits) & ((1 << $exp_bits) - 1);
-        if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
+        let start_exp = mask((start.to_bits() >> $mantissa_bits), $exp_bits);
+        let end_exp = mask((end.to_bits() >> $mantissa_bits), $exp_bits);
+        if start_exp > bitmask($exp_bits) - 3 || end_exp > bitmask($exp_bits) - 3 {
           panic!("Overflow or NaN");
         }
 
         let scale = end - start;
         let offset = start - scale;
         assert!(scale.is_finite() && offset.is_finite());
-        let exp = ((1 << ($exp_bits - 1)) - 1) << $mantissa_bits;
+        let exp = bitmask($exp_bits - 1) << $mantissa_bits;
         loop {
-          let frac = rng.$gen_func() & ((1 << $mantissa_bits) - 1);
+          let frac = mask(rng.$gen_func(), $mantissa_bits);
           let res = <$fty>::from_bits(frac | exp) * scale + offset;
           // Check for rounding errors
           if res >= start && res < end {
@@ -74,9 +83,9 @@ macro_rules! impl_float {
           assert!(val.is_finite());
           let bits = val.to_bits();
           let neg = (bits >> ($mantissa_bits + $exp_bits)) == 1;
-          let mut exp = (bits >> $mantissa_bits) & ((1 as $uty << $exp_bits) - 1);
-          let mut significand = bits & ((1 as $uty << $mantissa_bits) - 1);
-          assert!(exp != ((1 as $uty << $mantissa_bits) - 1));
+          let mut exp = mask(bits >> $mantissa_bits, $exp_bits);
+          let mut significand = mask(bits, $mantissa_bits);
+          assert!(exp != bitmask($exp_bits));
           if exp > 0 {
             significand |= 1 as $uty << $mantissa_bits;
           } else {
@@ -126,7 +135,7 @@ macro_rules! impl_float {
           drop(res_bigint); // drop to prevent accidental use
           while len > GOAL_LEN {
             let extra = len - GOAL_LEN;
-            let round_down = is_neg && (&res_biguint & ((BigUint::from(1u32) << extra) - 1u32)) != Zero::zero();
+            let round_down = is_neg && (&res_biguint & bitmask::<BigUint, _>(extra)) != Zero::zero();
             res_biguint >>= extra;
             res_exp += extra as $uty;
             assert!(res_exp <= ((1 << $exp_bits) - 2));
@@ -143,7 +152,7 @@ macro_rules! impl_float {
           res = NumCast::from(res_bigint).unwrap();
           while len < GOAL_LEN && res_exp > 1 {
             let additional = min(GOAL_LEN - len, (res_exp - 1) as usize);
-            let additional_bits = rng.$gen_func() & ((1 as $uty << additional) - 1);
+            let additional_bits = mask(rng.$gen_func(), additional);
             res <<= additional;
             if !is_neg {
               res |= additional_bits;
@@ -154,7 +163,7 @@ macro_rules! impl_float {
             len = res.bits();
           }
 
-          // Edgecase case is 10_0000_0000_0000. When we subtract from this value we lose one bit
+          // 10_0000_0000_0000 is an edgecase. When we subtract from this value we lose one bit
           // at the top and get fewer total bits. This means that we can fit in an extra bit at
           // the end, which if it's a zero will prevent rounding from getting us back to the
           // original value.
@@ -197,12 +206,12 @@ macro_rules! impl_float {
       #[cfg(feature = "exact-floats")]
       fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $fty {
         const GOAL_LEN: usize = $mantissa_bits + 1;
-        let mut exp: $uty = (1 as $uty << ($exp_bits - 1)) - 2;
+        let mut exp = bitmask::<$uty, _>($exp_bits - 1) - 1;
         let mut res = rng.$gen_func() & ((1 as $uty << GOAL_LEN) - 1);
         let mut len = res.bits();
         while len < GOAL_LEN && exp > 1 {
           let additional = min(GOAL_LEN - len, (exp - 1) as usize);
-          let additional_bits = rng.$gen_func() & ((1 as $uty << additional) - 1);
+          let additional_bits = mask(rng.$gen_func(), additional);
           res <<= additional;
           res |= additional_bits;
           exp -= additional as $uty;
