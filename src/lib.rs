@@ -2,7 +2,7 @@
 extern crate lazy_static;
 
 mod rangable_float;
-mod rangables;
+mod rangable_int;
 mod generators;
 
 pub use generators::{ SeedFrom, XorShift128Plus, XorShift64Star, StdRng };
