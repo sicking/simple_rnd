@@ -28,8 +28,8 @@ impl UnsignedInt for u32 {
   }
 }
 
-macro_rules! impl_float_rangable {
-  ($fty: ty, $uty: ty, $mantissa_bits: expr, $exp_bits: expr, $gen_func: ident, $float_between_func: ident) => (
+macro_rules! impl_float {
+  ($fty: ty, $uty: ty, $mantissa_bits: expr, $exp_bits: expr, $gen_func: ident) => (
     impl Rangeable for $fty {
       type Output = $fty;
 
@@ -170,7 +170,7 @@ macro_rules! impl_float_rangable {
         }
 
 
-        // Convert to u64 and then f64
+        // Convert to f64
         assert!(res.bits() == GOAL_LEN || (res_exp == 1 && res.bits() < GOAL_LEN));
         if (res & (1 as $uty << $mantissa_bits)) == 0 {
           assert_eq!(res_exp, 1);
@@ -184,25 +184,46 @@ macro_rules! impl_float_rangable {
         <$fty>::from_bits(res)
       }
     }
-  )
-}
 
-impl_float_rangable!(f64, u64, 52, 11, gen_u64, rng_float64_between);
-impl_float_rangable!(f32, u32, 23, 8, gen_u32, rng_float32_between);
+    impl ZeroOneable for $fty {
+      #[cfg(not(feature = "exact-floats"))]
+      fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $fty {
+        let frac = rng.$gen_func() & ((1 << $mantissa_bits) - 1);
+        let exp = ((1 as $uty << ($exp_bits - 1)) - 1) << $mantissa_bits;
+        <$fty>::from_bits(frac | exp) - 1.0
+      }
 
-macro_rules! impl_zerooneable {
-  ($ty: ty, $significand_bits: expr, $gen_func: ident, $exp_bias: expr) => (
-    impl ZeroOneable for $ty {
-      fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $ty {
-        let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
-        let exp = $exp_bias << $significand_bits;
-        <$ty>::from_bits(frac | exp) - 1.0
+
+      #[cfg(feature = "exact-floats")]
+      fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $fty {
+        const GOAL_LEN: usize = $mantissa_bits + 1;
+        let mut exp: $uty = (1 as $uty << ($exp_bits - 1)) - 2;
+        let mut res = rng.$gen_func() & ((1 as $uty << GOAL_LEN) - 1);
+        let mut len = res.bits();
+        while len < GOAL_LEN && exp > 1 {
+          let additional = min(GOAL_LEN - len, (exp - 1) as usize);
+          let additional_bits = rng.$gen_func() & ((1 as $uty << additional) - 1);
+          res <<= additional;
+          res |= additional_bits;
+          exp -= additional as $uty;
+          len = res.bits();
+        }
+
+        assert!(res.bits() == GOAL_LEN || (exp == 1 && res.bits() < GOAL_LEN));
+        if (res & (1 as $uty << $mantissa_bits)) == 0 {
+          assert_eq!(exp, 1);
+          exp = 0;
+        }
+        res &= !(1 as $uty << $mantissa_bits);
+        res |= exp << $mantissa_bits;
+        <$fty>::from_bits(res)
       }
     }
   )
 }
-impl_zerooneable!(f32, 23, gen_u32, 127);
-impl_zerooneable!(f64, 52, gen_u64, 1023);
+
+impl_float!(f64, u64, 52, 11, gen_u64);
+impl_float!(f32, u32, 23, 8, gen_u32);
 
 #[cfg(test)]
 mod tests {
@@ -382,6 +403,25 @@ mod tests {
         }
       }
     }
+  }
+
+  #[test]
+  #[cfg(feature = "exact-floats")]
+  fn test_exact_zeroone() {
+    let mut rng = TestRng { vals: vec![], repeat: Some(0) };
+    assert_eq!(rng.zeroone::<f32>(), 0.0);
+    let mut rng = TestRng { vals: vec![], repeat: Some(0xffff_ffff_ffff_ffff) };
+    let res: f32 = rng.zeroone();
+    assert!(0.9999 < res && res < 1.0);
+    assert_eq!(res, f32::from_bits(0x3f7f_ffff));
+    let res: f64 = rng.zeroone();
+    assert!(0.9999 < res && res < 1.0);
+    assert_eq!(res, f64::from_bits(0x3fef_ffff_ffff_ffff));
+
+    let mut rng = TestRng { vals: vec![Some(1), Some(0)], repeat: Some(0) };
+    assert_eq!(rng.zeroone::<f64>().to_bits(), 0x3950_0000_0000_0000);
+    let mut rng = TestRng { vals: vec![Some(1), Some(0)], repeat: Some(0) };
+    assert_eq!(rng.zeroone::<f32>().to_bits(), 0x2780_0000);
   }
 }
 
