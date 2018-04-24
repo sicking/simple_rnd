@@ -337,7 +337,7 @@ impl_rangable!(usize, usize);
 impl_rangable!(isize, usize);
 
 macro_rules! impl_float_rangable {
-  ($ty: ty, $significand_bits: expr, $exp_bits: expr, $gen_func: ident) => (
+  ($ty: ty, $significand_bits: expr, $exp_bits: expr, $gen_func: ident, $float_between_func: ident) => (
     impl Rangeable for $ty {
       type Output = $ty;
 
@@ -346,29 +346,8 @@ macro_rules! impl_float_rangable {
       }
 
       fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
-        if start >= end {
-          panic!("empty or inverted range");
-        }
-        let start_exp = (start.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
-        let end_exp = (end.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
-        if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
-          panic!("Overflow or NaN");
-        }
-
-        let scale = end - start;
-        let offset = start - scale;
-        assert!(scale.is_finite() && offset.is_finite());
-        let exp = ((1 << ($exp_bits - 1)) - 1) << $significand_bits;
-        loop {
-          let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
-          let res = <$ty>::from_bits(frac | exp) * scale + offset;
-          // Check for rounding errors
-          if res >= start && res < end {
-            return res
-          }
-        }
+        $float_between_func(rng, start, end)
       }
-
       fn zero() -> Self::Output {
         return 0.0
       }
@@ -396,12 +375,41 @@ macro_rules! impl_float_rangable {
         return **self < 0.0;
       }
     }
+
+    #[cfg(not(feature = "exact-floats"))]
+    fn $float_between_func<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
+      if start >= end {
+        panic!("empty or inverted range");
+      }
+      let start_exp = (start.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
+      let end_exp = (end.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
+      if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
+        panic!("Overflow or NaN");
+      }
+
+      let scale = end - start;
+      let offset = start - scale;
+      assert!(scale.is_finite() && offset.is_finite());
+      let exp = ((1 << ($exp_bits - 1)) - 1) << $significand_bits;
+      loop {
+        let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
+        let res = <$ty>::from_bits(frac | exp) * scale + offset;
+        // Check for rounding errors
+        if res >= start && res < end {
+          return res
+        }
+      }
+    }
+
+    #[cfg(feature = "exact-floats")]
+    fn $float_between_func<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
+      rng_float::$float_between_func(rng, start, end)
+    }
   )
 }
 
-#[cfg(not(feature = "exact-floats"))]
-impl_float_rangable!(f64, 52, 11, gen_u64);
-impl_float_rangable!(f32, 23, 8, gen_u32);
+impl_float_rangable!(f64, 52, 11, gen_u64, rng_float64_between);
+impl_float_rangable!(f32, 23, 8, gen_u32, rng_float32_between);
 
 macro_rules! impl_zerooneable {
   ($ty: ty, $significand_bits: expr, $gen_func: ident, $exp_bias: expr) => (
