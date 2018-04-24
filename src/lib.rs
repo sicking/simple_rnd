@@ -1,16 +1,16 @@
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(feature = "exact-floats")]
-mod rng_float;
-
+mod rangable_float;
+mod rangables;
 mod generators;
+
 pub use generators::{ SeedFrom, XorShift128Plus, XorShift64Star, StdRng };
 
 #[cfg(feature = "bigint")]
-mod rng_bigint;
+mod rangable_bigint;
 #[cfg(feature = "bigint")]
-use rng_bigint::BigUint;
+use rangable_bigint::BigUint;
 
 use std::collections::HashSet;
 use std::ops::AddAssign;
@@ -252,179 +252,6 @@ impl<'a, R, T> Iterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {
 
 impl<'a, R, T> ExactSizeIterator for SampleIter<'a, R, T> where R: 'a + Rng, T: 'a {}
 
-#[cfg(not(test))]
-macro_rules! call_gen_32 {
-  ($rng: ident, $limit: expr) => ($rng.gen_u32())
-}
-#[cfg(test)]
-macro_rules! call_gen_32 {
-  ($rng: ident, $limit: expr) => ($rng.test_gen_u32($limit))
-}
-#[cfg(not(test))]
-macro_rules! call_gen_64 {
-  ($rng: ident, $limit: expr) => ($rng.gen_u64())
-}
-#[cfg(test)]
-macro_rules! call_gen_64 {
-  ($rng: ident, $limit: expr) => ($rng.test_gen_u64($limit))
-}
-
-macro_rules! impl_rangable {
-  ($ty: ty, $uty: ty) => (
-    #[allow(unused_comparisons)]
-    impl Rangeable for $ty {
-      type Output = $ty;
-
-      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
-        if limit.is_neg() {
-          panic!("Rng.below() called with limit < 0");
-        }
-        if (limit as u32) < (std::u32::MAX / 10000) { // I.e. bias is less than 0.01%
-          (call_gen_32!(rng, limit as u32) % (limit as u32)) as $ty
-        } else {
-          (call_gen_64!(rng, limit as u64) % (limit as u64)) as $ty
-        }
-      }
-
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
-        if start >= end {
-          panic!("empty or inverted range");
-        }
-        let diff = end.wrapping_sub(start) as $uty;
-        (rng.below(diff) as $ty).wrapping_add(start)
-      }
-
-      fn zero() -> Self::Output {
-        return 0;
-      }
-
-      fn is_neg(&self) -> bool {
-        return *self < 0;
-      }
-    }
-
-    #[allow(unused_comparisons)]
-    impl<'a> Rangeable for &'a $ty {
-      type Output = $ty;
-
-      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a $ty) -> $ty {
-        <$ty>::rng_below(rng, *limit)
-      }
-
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a $ty, end: &'a $ty) -> $ty {
-        <$ty>::rng_range(rng, *start, *end)
-      }
-
-      fn zero() -> Self::Output {
-        return 0;
-      }
-
-      fn is_neg(&self) -> bool {
-        return **self < 0;
-      }
-    }
-  )
-}
-impl_rangable!(u8, u8);
-impl_rangable!(i8, u8);
-impl_rangable!(u16, u16);
-impl_rangable!(i16, u16);
-impl_rangable!(u32, u32);
-impl_rangable!(i32, u32);
-impl_rangable!(u64, u64);
-impl_rangable!(i64, u64);
-impl_rangable!(usize, usize);
-impl_rangable!(isize, usize);
-
-macro_rules! impl_float_rangable {
-  ($ty: ty, $significand_bits: expr, $exp_bits: expr, $gen_func: ident, $float_between_func: ident) => (
-    impl Rangeable for $ty {
-      type Output = $ty;
-
-      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
-        Self::rng_range(rng, 0.0, limit)
-      }
-
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
-        $float_between_func(rng, start, end)
-      }
-      fn zero() -> Self::Output {
-        return 0.0
-      }
-
-      fn is_neg(&self) -> bool {
-        return *self < 0.0;
-      }
-    }
-    impl<'a> Rangeable for &'a $ty {
-      type Output = $ty;
-
-      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a $ty) -> $ty {
-        <$ty>::rng_below(rng, *limit)
-      }
-
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a $ty, end: &'a $ty) -> $ty {
-        <$ty>::rng_range(rng, *start, *end)
-      }
-
-      fn zero() -> Self::Output {
-        return 0.0;
-      }
-
-      fn is_neg(&self) -> bool {
-        return **self < 0.0;
-      }
-    }
-
-    #[cfg(not(feature = "exact-floats"))]
-    fn $float_between_func<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
-      if start >= end {
-        panic!("empty or inverted range");
-      }
-      let start_exp = (start.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
-      let end_exp = (end.to_bits() >> $significand_bits) & ((1 << $exp_bits) - 1);
-      if start_exp > ((1 << $exp_bits) - 4) || end_exp > ((1 << $exp_bits) - 4) {
-        panic!("Overflow or NaN");
-      }
-
-      let scale = end - start;
-      let offset = start - scale;
-      assert!(scale.is_finite() && offset.is_finite());
-      let exp = ((1 << ($exp_bits - 1)) - 1) << $significand_bits;
-      loop {
-        let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
-        let res = <$ty>::from_bits(frac | exp) * scale + offset;
-        // Check for rounding errors
-        if res >= start && res < end {
-          return res
-        }
-      }
-    }
-
-    #[cfg(feature = "exact-floats")]
-    fn $float_between_func<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
-      rng_float::$float_between_func(rng, start, end)
-    }
-  )
-}
-
-impl_float_rangable!(f64, 52, 11, gen_u64, rng_float64_between);
-impl_float_rangable!(f32, 23, 8, gen_u32, rng_float32_between);
-
-macro_rules! impl_zerooneable {
-  ($ty: ty, $significand_bits: expr, $gen_func: ident, $exp_bias: expr) => (
-    impl ZeroOneable for $ty {
-      fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> $ty {
-        let frac = rng.$gen_func() & ((1 << $significand_bits) - 1);
-        let exp = $exp_bias << $significand_bits;
-        <$ty>::from_bits(frac | exp) - 1.0
-      }
-    }
-  )
-}
-impl_zerooneable!(f32, 23, gen_u32, 127);
-impl_zerooneable!(f64, 52, gen_u64, 1023);
-
 impl<'a, T, W> ToWeightedChoice for &'a(T, W) where W: Copy {
   type Item = &'a T;
   type Weight = W;
@@ -457,6 +284,27 @@ mod tests {
     for count in counts.iter() {
       assert!(60 <= *count && *count <= 140);
     }
+
+    assert!(catch_unwind(|| StdRng::new().below(0u32)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(-100i8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&0u32)).is_err());
+    assert!(catch_unwind(|| StdRng::new().below(&-100i8)).is_err());
+  }
+
+  #[test]
+  fn test_range() {
+    let mut a = StdRng::new();
+    for _ in 0..100 {
+      let x = a.range(-120, 120);
+      assert!(-120 <= x && x < 120);
+      let x = a.range(1usize, 50);
+      assert!(1 <= x && x < 50);
+    }
+
+    assert!(catch_unwind(|| StdRng::new().range(2, 1)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
+    assert!(catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
   }
 
   #[test]
@@ -473,23 +321,15 @@ mod tests {
 
   struct TestRng {
     x: u32,
-    fail64: bool,
     max: bool,
   }
   impl TestRng {
-    fn new(x: u32) -> Self { TestRng { x, fail64: false, max: false } }
-    fn new_fail64(x: u32) -> Self { TestRng { x, fail64: true, max: false } }
-    fn new_max() -> Self { TestRng { x: 0, fail64: false, max: true } }
+    fn new(x: u32) -> Self { TestRng { x, max: false } }
+    fn new_max() -> Self { TestRng { x: 0, max: true } }
   }
   impl Rng for TestRng {
     fn gen_u32(&mut self) -> u32 {
       self.x
-    }
-    fn gen_u64(&mut self) -> u64 {
-      if self.fail64 {
-        panic!("gen_u64 called");
-      }
-      ((self.x as u64) << 32) | (self.x as u64)
     }
     fn test_gen_u32(&mut self, limit: u32) -> u32 {
       if self.max {
@@ -682,74 +522,6 @@ mod tests {
   }
 
   #[test]
-  fn test_below_types() {
-    let mut a = StdRng::new();
-    assert_eq!(a.below(1i8), 0);
-    assert_eq!(a.below(1u8), 0);
-    assert_eq!(a.below(1i16), 0);
-    assert_eq!(a.below(1u16), 0);
-    assert_eq!(a.below(1i32), 0);
-    assert_eq!(a.below(1u32), 0);
-    assert_eq!(a.below(1i64), 0);
-    assert_eq!(a.below(1u64), 0);
-    assert_eq!(a.below(1isize), 0);
-    assert_eq!(a.below(1usize), 0);
-    assert!(catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
-    let mut t = TestRng::new_fail64(0);
-    t.below(std::u16::MAX);
-    t.below(std::i16::MAX);
-    t.below(std::u8::MAX);
-    t.below(std::i8::MAX);
-  }
-
-  #[test]
-  fn test_range_primitives() {
-    let mut a = StdRng::new();
-    assert_eq!(a.range(-2i8, -1), -2);
-    assert_eq!(a.range(1u8, 2), 1);
-    assert_eq!(a.range(-2i16, -1), -2);
-    assert_eq!(a.range(1u16, 2), 1);
-    assert_eq!(a.range(-2i32, -1), -2);
-    assert_eq!(a.range(1u32, 2), 1);
-    assert_eq!(a.range(-2i64, -1), -2);
-    assert_eq!(a.range(1u64, 2), 1);
-    assert_eq!(a.range(-2isize, -1), -2);
-    assert_eq!(a.range(1usize, 2), 1);
-    assert_eq!(a.range(&-2i32, &-1), -2);
-    assert_eq!(a.range(&1u32, &2), 1);
-    assert_eq!(a.range(&-2i64, &-1), -2);
-    assert_eq!(a.range(&1u64, &2), 1);
-
-    for _ in 0..10000 {
-      let x = a.range(-120i8, 120);
-      assert!(-120 <= x && x < 120);
-      let x = a.range(&-110i8, &110);
-      assert!(-110 <= x && x < 110);
-    }
-
-    let x = a.range(-120i8, 120);
-    assert!(-120 <= x && x < 120);
-    let x = a.range(-32760i16, 32760);
-    assert!(-32760 <= x && x < 32760);
-    let x = a.range(std::i32::MIN, std::i32::MAX);
-    assert!(std::i32::MIN <= x && x < std::i32::MAX);
-    let x = a.range(std::i64::MIN, std::i64::MAX);
-    assert!(std::i64::MIN <= x && x < std::i64::MAX);
-  }
-
-  #[test]
-  fn test_below_panics() {
-    assert!(catch_unwind(|| StdRng::new().below(0u32)).is_err());
-    assert!(catch_unwind(|| StdRng::new().below(-100i8)).is_err());
-    assert!(catch_unwind(|| StdRng::new().range(2, 1)).is_err());
-    assert!(catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
-    assert!(catch_unwind(|| StdRng::new().below(&0u32)).is_err());
-    assert!(catch_unwind(|| StdRng::new().below(&-100i8)).is_err());
-    assert!(catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
-    assert!(catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
-  }
-
-  #[test]
   fn test_permutation() {
     let mut a = StdRng::new();
     let mut found = Vec::new();
@@ -785,53 +557,5 @@ mod tests {
         assert!(found.insert(val_ref));
       }
     }
-  }
-
-  #[test]
-  fn test_float() {
-    let mut a = StdRng::new();
-    for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter().cloned() {
-      for _ in 0..1000 {
-        let x = a.below(val);
-        assert!(0.0 <= x && x < val);
-        let x = a.range(-val, val);
-        assert!(-val <= x && x < val);
-        if val - 1.0 != val {
-          let x = a.range(val - 1.0, val);
-          assert!(val - 1.0 <= x && x < val);
-          let x = a.range(-val - 1.0, -val);
-          assert!(-val - 1.0 <= x && x < -val);
-        }
-      }
-      let x = a.below(&val);
-      assert!(0.0 <= x && x < val);
-      let x = a.range(&-val, &val);
-      assert!(-val <= x && x < val);
-    }
-
-    assert!(catch_unwind(|| StdRng::new().below(std::f64::NAN)).is_err());
-    assert!(catch_unwind(|| StdRng::new().below(std::f64::INFINITY)).is_err());
-
-    for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter().cloned() {
-      for _ in 0..1000 {
-        let x = a.below(val);
-        assert!(0.0 <= x && x < val);
-        let x = a.range(-val, val);
-        assert!(-val <= x && x < val);
-        if val - 1.0 != val {
-          let x = a.range(val - 1.0, val);
-          assert!(val - 1.0 <= x && x < val);
-          let x = a.range(-val - 1.0, -val);
-          assert!(-val - 1.0 <= x && x < -val);
-        }
-      }
-      let x = a.below(&val);
-      assert!(0.0 <= x && x < val);
-      let x = a.range(&-val, &val);
-      assert!(-val <= x && x < val);
-    }
-
-    assert!(catch_unwind(|| StdRng::new().below(std::f32::NAN)).is_err());
-    assert!(catch_unwind(|| StdRng::new().below(std::f32::INFINITY)).is_err());
   }
 }
