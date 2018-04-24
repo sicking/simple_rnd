@@ -97,12 +97,12 @@ mod tests {
   #[cfg(feature = "bigint")]
   #[test]
   fn test_bigint() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     for bits in [0usize, 1, 3, 5, 31, 32, 33, 50, 63, 64, 65, 1500].iter().cloned() {
       let mut bits_set = BigUint::from(0u32);
       let mut bits_clear = (BigUint::from(1u32) << bits) - 1u32;
       for _ in 0..20 {
-        let gen = a.gen_biguint(bits);
+        let gen = rng.gen_biguint(bits);
         bits_set |= &gen;
         bits_clear &= &gen;
       }
@@ -113,21 +113,21 @@ mod tests {
     let lower = BigUint::from_slice(&[1, 1, 5]);
     let upper = BigUint::from_slice(&[14, 1, 47, 12]);
     for _ in 0..10000 {
-      let res = a.range(&lower, &upper);
+      let res = rng.range(&lower, &upper);
       assert!(lower <= res && res < upper);
     }
 
     let lower = BigInt::from_slice(Sign::Plus, &[1, 1, 5]);
     let upper = BigInt::from_slice(Sign::Plus, &[14, 1, 47, 12]);
     for _ in 0..10000 {
-      let res = a.range(&lower, &upper);
+      let res = rng.range(&lower, &upper);
       assert!(lower <= res && res < upper);
     }
 
     let lower = BigInt::from_slice(Sign::Minus, &[14, 1, 47, 12]);
     let upper = BigInt::from_slice(Sign::Minus, &[1, 1, 5]);
     for _ in 0..10000 {
-      let res = a.range(&lower, &upper);
+      let res = rng.range(&lower, &upper);
       assert!(lower <= res && res < upper);
     }
 
@@ -136,7 +136,7 @@ mod tests {
     let mut has_positive = false;
     let mut has_negative = false;
     for _ in 0..10000 {
-      let res = a.range(&lower, &upper);
+      let res = rng.range(&lower, &upper);
       assert!(lower <= res && res < upper);
       has_positive = has_positive || res.is_positive();
       has_negative = has_negative || res.is_negative();

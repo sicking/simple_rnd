@@ -111,27 +111,27 @@ mod tests {
 
   #[test]
   fn test_below_types() {
-    let mut a = StdRng::new();
-    assert_eq!(a.below(1i8), 0);
-    assert_eq!(a.below(1u8), 0);
-    assert_eq!(a.below(1i16), 0);
-    assert_eq!(a.below(1u16), 0);
-    assert_eq!(a.below(1i32), 0);
-    assert_eq!(a.below(1u32), 0);
-    assert_eq!(a.below(1i64), 0);
-    assert_eq!(a.below(1u64), 0);
-    assert_eq!(a.below(1isize), 0);
-    assert_eq!(a.below(1usize), 0);
-    assert_eq!(a.below(1i8), 0);
-    assert_eq!(a.below(1u8), 0);
-    assert_eq!(a.below(1i16), 0);
-    assert_eq!(a.below(1u16), 0);
-    assert_eq!(a.below(1i32), 0);
-    assert_eq!(a.below(1u32), 0);
-    assert_eq!(a.below(1i64), 0);
-    assert_eq!(a.below(1u64), 0);
-    assert_eq!(a.below(1isize), 0);
-    assert_eq!(a.below(1usize), 0);
+    let mut rng = StdRng::new();
+    assert_eq!(rng.below(1i8), 0);
+    assert_eq!(rng.below(1u8), 0);
+    assert_eq!(rng.below(1i16), 0);
+    assert_eq!(rng.below(1u16), 0);
+    assert_eq!(rng.below(1i32), 0);
+    assert_eq!(rng.below(1u32), 0);
+    assert_eq!(rng.below(1i64), 0);
+    assert_eq!(rng.below(1u64), 0);
+    assert_eq!(rng.below(1isize), 0);
+    assert_eq!(rng.below(1usize), 0);
+    assert_eq!(rng.below(1i8), 0);
+    assert_eq!(rng.below(1u8), 0);
+    assert_eq!(rng.below(1i16), 0);
+    assert_eq!(rng.below(1u16), 0);
+    assert_eq!(rng.below(1i32), 0);
+    assert_eq!(rng.below(1u32), 0);
+    assert_eq!(rng.below(1i64), 0);
+    assert_eq!(rng.below(1u64), 0);
+    assert_eq!(rng.below(1isize), 0);
+    assert_eq!(rng.below(1usize), 0);
 
     assert!(catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
     let mut t = TestRng::new_fail64(0);
@@ -143,36 +143,36 @@ mod tests {
 
   #[test]
   fn test_range_primitives() {
-    let mut a = StdRng::new();
-    assert_eq!(a.range(-2i8, -1), -2);
-    assert_eq!(a.range(1u8, 2), 1);
-    assert_eq!(a.range(-2i16, -1), -2);
-    assert_eq!(a.range(1u16, 2), 1);
-    assert_eq!(a.range(-2i32, -1), -2);
-    assert_eq!(a.range(1u32, 2), 1);
-    assert_eq!(a.range(-2i64, -1), -2);
-    assert_eq!(a.range(1u64, 2), 1);
-    assert_eq!(a.range(-2isize, -1), -2);
-    assert_eq!(a.range(1usize, 2), 1);
-    assert_eq!(a.range(&-2i32, &-1), -2);
-    assert_eq!(a.range(&1u32, &2), 1);
-    assert_eq!(a.range(&-2i64, &-1), -2);
-    assert_eq!(a.range(&1u64, &2), 1);
+    let mut rng = StdRng::new();
+    assert_eq!(rng.range(-2i8, -1), -2);
+    assert_eq!(rng.range(1u8, 2), 1);
+    assert_eq!(rng.range(-2i16, -1), -2);
+    assert_eq!(rng.range(1u16, 2), 1);
+    assert_eq!(rng.range(-2i32, -1), -2);
+    assert_eq!(rng.range(1u32, 2), 1);
+    assert_eq!(rng.range(-2i64, -1), -2);
+    assert_eq!(rng.range(1u64, 2), 1);
+    assert_eq!(rng.range(-2isize, -1), -2);
+    assert_eq!(rng.range(1usize, 2), 1);
+    assert_eq!(rng.range(&-2i32, &-1), -2);
+    assert_eq!(rng.range(&1u32, &2), 1);
+    assert_eq!(rng.range(&-2i64, &-1), -2);
+    assert_eq!(rng.range(&1u64, &2), 1);
 
     for _ in 0..10000 {
-      let x = a.range(-120i8, 120);
+      let x = rng.range(-120i8, 120);
       assert!(-120 <= x && x < 120);
-      let x = a.range(&-110i8, &110);
+      let x = rng.range(&-110i8, &110);
       assert!(-110 <= x && x < 110);
     }
 
-    let x = a.range(-120i8, 120);
+    let x = rng.range(-120i8, 120);
     assert!(-120 <= x && x < 120);
-    let x = a.range(-32760i16, 32760);
+    let x = rng.range(-32760i16, 32760);
     assert!(-32760 <= x && x < 32760);
-    let x = a.range(std::i32::MIN, std::i32::MAX);
+    let x = rng.range(std::i32::MIN, std::i32::MAX);
     assert!(std::i32::MIN <= x && x < std::i32::MAX);
-    let x = a.range(std::i64::MIN, std::i64::MAX);
+    let x = rng.range(std::i64::MIN, std::i64::MAX);
     assert!(std::i64::MIN <= x && x < std::i64::MAX);
   }
 }

@@ -276,10 +276,10 @@ mod tests {
 
   #[test]
   fn test_below() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let mut counts = [0u32; 47];
     for _ in 0..4700 {
-      counts[a.below(47usize)] += 1;
+      counts[rng.below(47usize)] += 1;
     }
     for count in counts.iter() {
       assert!(60 <= *count && *count <= 140);
@@ -293,11 +293,11 @@ mod tests {
 
   #[test]
   fn test_range() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     for _ in 0..100 {
-      let x = a.range(-120, 120);
+      let x = rng.range(-120, 120);
       assert!(-120 <= x && x < 120);
-      let x = a.range(1usize, 50);
+      let x = rng.range(1usize, 50);
       assert!(1 <= x && x < 50);
     }
 
@@ -309,10 +309,10 @@ mod tests {
 
   #[test]
   fn test_chance() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let mut count = 0;
     for _ in 0..5432 {
-      if a.chance(321, 5432) {
+      if rng.chance(321, 5432) {
         count += 1;
       }
     }
@@ -349,9 +349,9 @@ mod tests {
 
   #[test]
   fn test_zeroone() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     for _ in 0..5000 {
-      let v = a.zeroone::<f32>();
+      let v = rng.zeroone::<f32>();
       assert!(0.0 <= v && v < 1.0);
     }
     let mut t = TestRng::new(0);
@@ -361,7 +361,7 @@ mod tests {
     assert!(t.zeroone::<f32>() < 1.0);
 
     for _ in 0..5000 {
-      let v = a.zeroone::<f64>();
+      let v = rng.zeroone::<f64>();
       assert!(0.0 <= v && v < 1.0);
     }
     let mut t = TestRng::new(0);
@@ -374,10 +374,10 @@ mod tests {
   #[test]
   fn test_shuffle() {
     let mut positions = [0u32; 16];
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     for _ in 0..10000 {
       let mut arr: [usize; 4] = [0, 1, 2, 3];
-      a.shuffle(&mut arr);
+      rng.shuffle(&mut arr);
       for i in 0..4 {
         positions[i * 4 + arr[i]] += 1;
       }
@@ -389,12 +389,12 @@ mod tests {
 
   #[test]
   fn test_choose() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
     let mut chosen = Vec::new();
     chosen.resize(chars.len(), 0i32);
     for _ in 0..10000 {
-      let picked = *a.choose(&chars).unwrap();
+      let picked = *rng.choose(&chars).unwrap();
       chosen[(picked as usize) - ('a' as usize)] += 1;
     }
     for count in chosen.iter() {
@@ -405,7 +405,7 @@ mod tests {
     chosen.truncate(0);
     chosen.resize(40, 0i32);
     for _ in 0..10000 {
-      *a.choose_mut(&mut chosen).unwrap() += 1;
+      *rng.choose_mut(&mut chosen).unwrap() += 1;
     }
     for count in chosen.iter() {
       let err = *count - (10000 / (chosen.len() as i32));
@@ -415,7 +415,7 @@ mod tests {
 
   #[test]
   fn test_choose_weighted() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
     let weights = vec![1u32, 2, 3, 0, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7];
     let total_weight : u32 = weights.iter().sum();
@@ -426,7 +426,7 @@ mod tests {
     chosen.resize(chars.len(), 0i32);
     for _ in 0..10000 {
       let iter = chars.iter().zip(weights.iter());
-      let picked = *a.choose_weighted(iter, total_weight).unwrap();
+      let picked = *rng.choose_weighted(iter, total_weight).unwrap();
       chosen[(picked as usize) - ('a' as usize)] += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
@@ -439,7 +439,7 @@ mod tests {
     chosen.resize(weights.len(), 0);
     for _ in 0..10000 {
       let iter = chosen.iter_mut().zip(weights.iter().map(|x| *x));
-      *a.choose_weighted(iter, total_weight).unwrap() += 1;
+      *rng.choose_weighted(iter, total_weight).unwrap() += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
       let err = *count - ((weights[i] * 10000 / total_weight) as i32);
@@ -449,7 +449,7 @@ mod tests {
     // Automatic dereferencing when iterating references of item+weight tuples
     let mut weighted_items = weights.iter().rev().map(|x| (0i32, *x)).collect::<Vec<_>>();
     for _ in 0..10000 {
-      *a.choose_weighted(weighted_items.iter_mut(), total_weight).unwrap() += 1;
+      *rng.choose_weighted(weighted_items.iter_mut(), total_weight).unwrap() += 1;
     }
     for &(count, weight) in weighted_items.iter() {
       let err = count - ((weight * 10000 / total_weight) as i32);
@@ -485,7 +485,7 @@ mod tests {
 
   #[test]
   fn test_choose_weighted2() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let chars = "abcdefghijklmn".chars().collect::<Vec<char>>();
     let weights = vec![1u32, 2, 3, 0, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7];
     let total_weight: u32 = weights.iter().sum();
@@ -494,7 +494,7 @@ mod tests {
     let mut chosen = Vec::new();
     chosen.resize(chars.len(), 0i32);
     for _ in 0..10000 {
-      let picked = *a.choose_weighted2(chars.iter(), weights.iter()).unwrap();
+      let picked = *rng.choose_weighted2(chars.iter(), weights.iter()).unwrap();
       chosen[(picked as usize) - ('a' as usize)] += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
@@ -506,7 +506,7 @@ mod tests {
     chosen.truncate(0);
     chosen.resize(weights.len(), 0);
     for _ in 0..10000 {
-      *a.choose_weighted2(chosen.iter_mut(), weights.iter()).unwrap() += 1;
+      *rng.choose_weighted2(chosen.iter_mut(), weights.iter()).unwrap() += 1;
     }
     for (i, count) in chosen.iter().enumerate() {
       let err = *count - ((weights[i] * 10000 / total_weight) as i32);
@@ -523,10 +523,10 @@ mod tests {
 
   #[test]
   fn test_permutation() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let mut found = Vec::new();
     found.resize(20, false);
-    let perm = a.permutation(found.len());
+    let perm = rng.permutation(found.len());
     for pos in perm.iter() {
       assert_eq!(found[*pos], false);
       found[*pos] = true;
@@ -538,10 +538,10 @@ mod tests {
 
   #[test]
   fn test_sample() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     let vals = (0u16..1000).rev().collect::<Vec<u16>>();
     for i in 0..100 {
-      let selected = a.sample(&vals, i * 10);
+      let selected = rng.sample(&vals, i * 10);
       assert_eq!(selected.len(), i * 10);
       let mut found = HashSet::new();
       for val_ref in selected {
@@ -550,7 +550,7 @@ mod tests {
       assert_eq!(found.len(), i * 10);
     }
     for i in 0..100 {
-      let selected: Vec<u16> = a.sample(&vals, i * 10).map(|x| *x).collect();
+      let selected: Vec<u16> = rng.sample(&vals, i * 10).map(|x| *x).collect();
       assert_eq!(selected.len(), i * 10);
       let mut found = HashSet::new();
       for val_ref in selected {

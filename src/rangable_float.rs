@@ -242,23 +242,23 @@ mod tests {
 
   #[test]
   fn test_float() {
-    let mut a = StdRng::new();
+    let mut rng = StdRng::new();
     for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter().cloned() {
       for _ in 0..1000 {
-        let x = a.below(val);
+        let x = rng.below(val);
         assert!(0.0 <= x && x < val);
-        let x = a.range(-val, val);
+        let x = rng.range(-val, val);
         assert!(-val <= x && x < val);
         if val - 1.0 != val {
-          let x = a.range(val - 1.0, val);
+          let x = rng.range(val - 1.0, val);
           assert!(val - 1.0 <= x && x < val);
-          let x = a.range(-val - 1.0, -val);
+          let x = rng.range(-val - 1.0, -val);
           assert!(-val - 1.0 <= x && x < -val);
         }
       }
-      let x = a.below(&val);
+      let x = rng.below(&val);
       assert!(0.0 <= x && x < val);
-      let x = a.range(&-val, &val);
+      let x = rng.range(&-val, &val);
       assert!(-val <= x && x < val);
     }
 
@@ -267,20 +267,20 @@ mod tests {
 
     for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter().cloned() {
       for _ in 0..1000 {
-        let x = a.below(val);
+        let x = rng.below(val);
         assert!(0.0 <= x && x < val);
-        let x = a.range(-val, val);
+        let x = rng.range(-val, val);
         assert!(-val <= x && x < val);
         if val - 1.0 != val {
-          let x = a.range(val - 1.0, val);
+          let x = rng.range(val - 1.0, val);
           assert!(val - 1.0 <= x && x < val);
-          let x = a.range(-val - 1.0, -val);
+          let x = rng.range(-val - 1.0, -val);
           assert!(-val - 1.0 <= x && x < -val);
         }
       }
-      let x = a.below(&val);
+      let x = rng.below(&val);
       assert!(0.0 <= x && x < val);
-      let x = a.range(&-val, &val);
+      let x = rng.range(&-val, &val);
       assert!(-val <= x && x < val);
     }
 
