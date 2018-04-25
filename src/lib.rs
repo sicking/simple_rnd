@@ -4,11 +4,11 @@ extern crate lazy_static;
 mod rangable_float;
 mod rangable_int;
 mod generators;
+#[cfg(feature = "bigint")]
+mod rangable_bigint;
 
 pub use generators::{ SeedFrom, XorShift128Plus, XorShift64Star, StdRng };
 
-#[cfg(feature = "bigint")]
-mod rangable_bigint;
 #[cfg(feature = "bigint")]
 use rangable_bigint::BigUint;
 

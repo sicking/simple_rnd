@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use std;
 use super::{ Rng, Rangeable };
 
@@ -21,38 +22,41 @@ impl<'a, Rang: Rangeable + Copy> Rangeable for &'a Rang {
   }
 }
 
-#[cfg(not(test))]
-macro_rules! call_gen_32 {
-  ($rng: ident, $limit: expr) => ($rng.gen_u32())
-}
-#[cfg(test)]
-macro_rules! call_gen_32 {
-  ($rng: ident, $limit: expr) => ($rng.test_gen_u32($limit))
-}
-#[cfg(not(test))]
-macro_rules! call_gen_64 {
-  ($rng: ident, $limit: expr) => ($rng.gen_u64())
-}
-#[cfg(test)]
-macro_rules! call_gen_64 {
-  ($rng: ident, $limit: expr) => ($rng.test_gen_u64($limit))
-}
-
 macro_rules! impl_rangable {
-  ($ty: ty, $uty: ty) => (
+  ($ty: ty, $uty: ty, $gen_ty: ty, $gen_func: ident, $gen_test_func: ident) => (
     #[allow(unused_comparisons)]
     impl Rangeable for $ty {
       type Output = $ty;
 
+      #[cfg(not(test))]
       fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
         if limit.is_neg() {
           panic!("Rng.below() called with limit < 0");
         }
-        if (limit as u32) < (std::u32::MAX / 10000) { // I.e. bias is less than 0.01%
-          (call_gen_32!(rng, limit as u32) % (limit as u32)) as $ty
-        } else {
-          (call_gen_64!(rng, limit as u64) % (limit as u64)) as $ty
+        let limit_ty = limit as $gen_ty;
+        let zone = (0 as $gen_ty).wrapping_sub((0 as $gen_ty).wrapping_sub(limit_ty) % limit_ty);
+        loop {
+          let res = rng.$gen_func();
+          if res < zone {
+            return (res % limit_ty) as $ty;
+          }
         }
+      }
+
+      #[cfg(test)]
+      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $ty) -> $ty {
+        if limit.is_neg() {
+          panic!("Rng.below() called with limit < 0");
+        }
+        let limit_ty = limit as $gen_ty;
+        let zone = (0 as $gen_ty).wrapping_sub((0 as $gen_ty).wrapping_sub(limit_ty) % limit_ty);
+        for _ in 0..10 {
+          let res = rng.$gen_test_func(limit_ty);
+          if res < zone {
+            return (res % limit_ty) as $ty;
+          }
+        }
+        return (rng.$gen_test_func(limit_ty) % limit_ty) as $ty;
       }
 
       fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $ty, end: $ty) -> $ty {
@@ -73,22 +77,21 @@ macro_rules! impl_rangable {
     }
   )
 }
-impl_rangable!(u8, u8);
-impl_rangable!(i8, u8);
-impl_rangable!(u16, u16);
-impl_rangable!(i16, u16);
-impl_rangable!(u32, u32);
-impl_rangable!(i32, u32);
-impl_rangable!(u64, u64);
-impl_rangable!(i64, u64);
-impl_rangable!(usize, usize);
-impl_rangable!(isize, usize);
+impl_rangable!(u8, u8, u32, gen_u32, test_gen_u32);
+impl_rangable!(i8, u8, u32, gen_u32, test_gen_u32);
+impl_rangable!(u16, u16, u32, gen_u32, test_gen_u32);
+impl_rangable!(i16, u16, u32, gen_u32, test_gen_u32);
+impl_rangable!(u32, u32, u32, gen_u32, test_gen_u32);
+impl_rangable!(i32, u32, u32, gen_u32, test_gen_u32);
+impl_rangable!(u64, u64, u64, gen_u64, test_gen_u64);
+impl_rangable!(i64, u64, u64, gen_u64, test_gen_u64);
+impl_rangable!(usize, usize, u64, gen_u64, test_gen_u64);
+impl_rangable!(isize, usize, u64, gen_u64, test_gen_u64);
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use super::super::StdRng;
-  use std::panic::catch_unwind;
 
   struct TestRng {
     x: u32,
@@ -133,8 +136,9 @@ mod tests {
     assert_eq!(rng.below(1isize), 0);
     assert_eq!(rng.below(1usize), 0);
 
-    assert!(catch_unwind(|| TestRng::new_fail64(0).below(std::u32::MAX)).is_err());
     let mut t = TestRng::new_fail64(0);
+    t.below(std::u32::MAX);
+    t.below(std::i32::MAX);
     t.below(std::u16::MAX);
     t.below(std::i16::MAX);
     t.below(std::u8::MAX);
