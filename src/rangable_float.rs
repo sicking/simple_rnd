@@ -3,6 +3,7 @@ extern crate num_traits;
 
 use std::{ self, f64, f32 };
 use super::{ Rng, Rangeable, ZeroOneable };
+use RangeImpl;
 
 #[cfg(feature = "exact-floats")]
 use self::num_bigint::{ BigUint, BigInt, Sign };
@@ -37,23 +38,43 @@ fn mask<T, S>(val: T, bits: S) -> T
   val & bitmask(bits)
 }
 
+#[cfg(not(feature = "exact-floats"))]
+pub struct RangeFloat<T> {
+  start: T,
+  end: T,
+}
+
+#[cfg(feature = "exact-floats")]
+pub struct RangeFloat<T> {
+  start: BigInt,
+  end: BigInt,
+  exponent: u16,
+  _marker: std::marker::PhantomData<T>,
+}
+
 macro_rules! impl_float {
   ($fty: ty, $uty: ty, $mantissa_bits: expr, $exp_bits: expr, $gen_func: ident) => (
     impl Rangeable for $fty {
       type Output = $fty;
+      type Range = RangeFloat<$fty>;
 
-      fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: $fty) -> $fty {
-        Self::rng_range(rng, 0.0, limit)
-      }
       fn zero() -> Self::Output {
         return 0.0
       }
       fn is_neg(&self) -> bool {
         return *self < 0.0;
       }
+    }
+
+    impl RangeImpl<$fty> for RangeFloat<$fty> {
+      type Output = $fty;
+
+      fn new_below(limit: $fty) -> Self {
+        Self::new_range(0.0, limit)
+      }
 
       #[cfg(not(feature = "exact-floats"))]
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $fty, end: $fty) -> $fty {
+      fn new_range(start: $fty, end: $fty) -> Self {
         if start >= end {
           panic!("empty or inverted range");
         }
@@ -62,28 +83,31 @@ macro_rules! impl_float {
         if start_exp > bitmask($exp_bits) - 3 || end_exp > bitmask($exp_bits) - 3 {
           panic!("Overflow or NaN");
         }
+        RangeFloat { start, end }
+      }
 
-        let scale = end - start;
-        let offset = start - scale;
-        assert!(scale.is_finite() && offset.is_finite());
+      #[cfg(not(feature = "exact-floats"))]
+      fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> $fty {
+        let scale = self.end - self.start;
+        let offset = self.start - self.scale;
         let exp = bitmask($exp_bits - 1) << $mantissa_bits;
         loop {
           let frac = mask(rng.$gen_func(), $mantissa_bits);
           let res = <$fty>::from_bits(frac | exp) * scale + offset;
           // Check for rounding errors
           if res >= start && res < end {
-            return res
+            return res;
           }
         }
       }
 
       #[cfg(feature = "exact-floats")]
-      fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: $fty, end: $fty) -> $fty {
-        fn parse_float(val: $fty) -> (BigInt, $uty) {
+      fn new_range(start: $fty, end: $fty) -> Self {
+        fn parse_float(val: $fty) -> (BigInt, u32) {
           assert!(val.is_finite());
           let bits = val.to_bits();
           let neg = (bits >> ($mantissa_bits + $exp_bits)) == 1;
-          let mut exp = mask(bits >> $mantissa_bits, $exp_bits);
+          let mut exp = mask(bits >> $mantissa_bits, $exp_bits) as u32;
           let mut significand = mask(bits, $mantissa_bits);
           assert!(exp != bitmask($exp_bits));
           if exp > 0 {
@@ -95,7 +119,7 @@ macro_rules! impl_float {
           if significand != 0 {
             let zeros = significand.trailing_zeros();
             significand >>= zeros;
-            exp += zeros as $uty;
+            exp += zeros as u32;
           }
           (BigInt::from_biguint(if neg { Sign::Minus } else { Sign::Plus },
                                 BigUint::from(significand)),
@@ -109,18 +133,23 @@ macro_rules! impl_float {
           panic!("Start or end is NaN or infinite")
         }
 
-        let mut res_exp;
+        let exponent;
         let (mut start_parsed, start_parsed_exp) = parse_float(start);
         let (mut end_parsed, end_parsed_exp) = parse_float(end);
         if start_parsed_exp > end_parsed_exp {
           start_parsed = &start_parsed << ((start_parsed_exp - end_parsed_exp) as usize);
-          res_exp = end_parsed_exp;
+          exponent = end_parsed_exp as u16;
         } else {
           end_parsed = &end_parsed << ((end_parsed_exp - start_parsed_exp) as usize);
-          res_exp = start_parsed_exp;
+          exponent = start_parsed_exp as u16;
         }
+        RangeFloat { start: start_parsed, end: end_parsed, exponent, _marker: std::marker::PhantomData }
+      }
 
-        let mut res_bigint = rng.range(&start_parsed, &end_parsed);
+      #[cfg(feature = "exact-floats")]
+      fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> $fty {
+        let mut res_bigint = rng.range(&self.start, &self.end);
+        let mut res_exp = self.exponent as $uty;
 
         let is_neg = res_bigint.is_negative();
         if is_neg {

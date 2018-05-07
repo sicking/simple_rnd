@@ -2,7 +2,7 @@ extern crate num_bigint;
 extern crate num_traits;
 
 pub use self::num_bigint::{ BigUint, BigInt, Sign };
-use super::{ Rng, Rangeable };
+use super::{ Rng, Rangeable, RangeImpl };
 use self::num_traits::Zero;
 use self::num_traits::Signed;
 
@@ -17,6 +17,7 @@ macro_rules! call_gen_biguint {
 
 impl<'a> Rangeable for &'a BigUint {
   type Output = BigUint;
+  type Range = RangeBig<BigUint>;
 
   fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a BigUint) -> BigUint {
     if limit.is_zero() {
@@ -52,8 +53,9 @@ impl<'a> Rangeable for &'a BigUint {
 
 impl<'a> Rangeable for &'a BigInt {
   type Output = BigInt;
+  type Range = RangeBig<BigInt>;
 
-  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: &'a BigInt) -> BigInt {
+  fn rng_below<'b, R: Rng + ?Sized>(rng: &'b mut R, limit: &'a BigInt) -> BigInt {
     if !limit.is_positive() {
       panic!("Rng.below() called with limit <= 0");
     }
@@ -70,7 +72,7 @@ impl<'a> Rangeable for &'a BigInt {
     }
   }
 
-  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: &'a BigInt, end: &'a BigInt) -> BigInt {
+  fn rng_range<'b, R: Rng + ?Sized>(rng: &'b mut R, start: &'a BigInt, end: &'a BigInt) -> BigInt {
     if start >= end {
       panic!("empty or inverted range");
     }
@@ -87,6 +89,37 @@ impl<'a> Rangeable for &'a BigInt {
   }
 }
 
+pub struct RangeBig<T> {
+  limit: T,
+  offset: T,
+}
+
+impl<'a> RangeImpl<&'a BigUint> for RangeBig<BigUint> {
+  type Output = BigUint;
+  fn new_below(limit: &'a BigUint) -> Self {
+    RangeBig { limit: limit.clone(), offset: Zero::zero() }
+  }
+  fn new_range(start: &'a BigUint, end: &'a BigUint) -> Self {
+    RangeBig { limit: end - start, offset: start.clone() }
+  }
+  fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> Self::Output {
+    rng.below(&self.limit) + &self.offset
+  }
+}
+
+impl<'a> RangeImpl<&'a BigInt> for RangeBig<BigInt> {
+  type Output = BigInt;
+  fn new_below(limit: &'a BigInt) -> Self {
+    RangeBig { limit: limit.clone(), offset: Zero::zero() }
+  }
+  fn new_range(start: &'a BigInt, end: &'a BigInt) -> Self {
+    RangeBig { limit: end - start, offset: start.clone() }
+  }
+  fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> Self::Output {
+    rng.below(&self.limit) + &self.offset
+  }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -94,7 +127,6 @@ mod tests {
   use super::super::StdRng;
   use std::panic::catch_unwind;
 
-  #[cfg(feature = "bigint")]
   #[test]
   fn test_bigint() {
     let mut rng = StdRng::new();

@@ -17,11 +17,27 @@ use std::ops::AddAssign;
 
 pub trait Rangeable : Sized {
   type Output;
-  fn rng_below<R: Rng + ?Sized>(rng: &mut R, limit: Self) -> Self::Output;
-  fn rng_range<R: Rng + ?Sized>(rng: &mut R, start: Self, end: Self) -> Self::Output;
+  type Range: RangeImpl<Self, Output=Self::Output>;
+
+  fn rng_below<'b, R: Rng + ?Sized>(rng: &'b mut R, limit: Self) -> Self::Output {
+    let range = Self::Range::new_below(limit);
+    range.gen(rng)
+  }
+  fn rng_range<'b, R: Rng + ?Sized>(rng: &'b mut R, start: Self, end: Self) -> Self::Output {
+    let range = Self::Range::new_range(start, end);
+    range.gen(rng)
+  }
   fn zero() -> Self::Output;
   fn is_neg(&self) -> bool;
 }
+
+pub trait RangeImpl<T: Rangeable> : Sized {
+  type Output;
+  fn new_below(limit: T) -> Self;
+  fn new_range(start: T, end: T) -> Self;
+  fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> Self::Output;
+}
+
 pub trait ZeroOneable : Sized {
   fn rng_zeroone<R: Rng + ?Sized>(rng: &mut R) -> Self;
 }
