@@ -162,6 +162,10 @@ mod tests {
     assert_eq!(rng.below(1u64), 0);
     assert_eq!(rng.below(1isize), 0);
     assert_eq!(rng.below(1usize), 0);
+    assert_eq!(rng.below(&1u8), 0);
+    assert_eq!(rng.below(&&1u16), 0);
+    assert_eq!(rng.below(&&&1u64), 0);
+    assert_eq!(rng.below(&&&&&&1u64), 0);
 
     let mut t = TestRng::new_fail64(0);
     t.below(std::u32::MAX);
@@ -189,6 +193,10 @@ mod tests {
     assert_eq!(rng.range(&1u32, &2), 1);
     assert_eq!(rng.range(&-2i64, &-1), -2);
     assert_eq!(rng.range(&1u64, &2), 1);
+    assert_eq!(rng.range(&&-2i32, &&-1), -2);
+    assert_eq!(rng.range(&&1u32, &&2), 1);
+    assert_eq!(rng.range(&&&-2i64, &&&-1), -2);
+    assert_eq!(rng.range(&&&&&1u64, &&&&&2), 1);
 
     for _ in 0..10000 {
       let x = rng.range(-120i8, 120);

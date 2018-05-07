@@ -57,12 +57,24 @@ pub trait Rng {
     x << 32 | y
   }
 
-  fn below<T, O>(&mut self, limit: T) -> O where T: Rangeable<Output=O> {
+  fn below<T>(&mut self, limit: T) -> T::Output where T: Rangeable {
     T::rng_below(self, limit)
   }
 
-  fn range<T, O>(&mut self, start: T, end: T) -> O where T: Rangeable<Output=O> {
+  fn range<T>(&mut self, start: T, end: T) -> T::Output where T: Rangeable {
     T::rng_range(self, start, end)
+  }
+
+  fn make_range_below<T>(&mut self, limit: T) -> T::Range where T: Rangeable {
+    <T::Range>::new_below(limit)
+  }
+
+  fn make_range<T>(&mut self, start: T, end: T) -> T::Range where T: Rangeable {
+    <T::Range>::new_range(start, end)
+  }
+
+  fn from_range<R, T>(&mut self, range: &R) -> R::Output where R: RangeImpl<T>, T: Rangeable {
+    range.gen(self)
   }
 
   fn chance(&mut self, num: u32, denom: u32) -> bool {
@@ -321,6 +333,27 @@ mod tests {
     assert!(catch_unwind(|| StdRng::new().range(20u8, 10u8)).is_err());
     assert!(catch_unwind(|| StdRng::new().range(&2, &1)).is_err());
     assert!(catch_unwind(|| StdRng::new().range(&20u8, &10u8)).is_err());
+  }
+
+  #[test]
+  fn test_range_obj() {
+    let mut rng = StdRng::new();
+    let range = rng.make_range_below(47i16);
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(0 <= x && x < 47);
+    }
+
+    let range = rng.make_range(-47i16, 5);
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(-47 <= x && x < 5);
+    }
+
+    assert!(catch_unwind(|| StdRng::new().make_range_below(-1i8)).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range_below(0u32)).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range(5, 5)).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range(-4, -5)).is_err());
   }
 
   #[test]

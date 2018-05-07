@@ -97,9 +97,15 @@ pub struct RangeBig<T> {
 impl<'a> RangeImpl<&'a BigUint> for RangeBig<BigUint> {
   type Output = BigUint;
   fn new_below(limit: &'a BigUint) -> Self {
+    if limit.is_zero() {
+      panic!("Creating range limit <= 0");
+    }
     RangeBig { limit: limit.clone(), offset: Zero::zero() }
   }
   fn new_range(start: &'a BigUint, end: &'a BigUint) -> Self {
+    if start >= end {
+      panic!("empty or inverted range");
+    }
     RangeBig { limit: end - start, offset: start.clone() }
   }
   fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> Self::Output {
@@ -110,9 +116,15 @@ impl<'a> RangeImpl<&'a BigUint> for RangeBig<BigUint> {
 impl<'a> RangeImpl<&'a BigInt> for RangeBig<BigInt> {
   type Output = BigInt;
   fn new_below(limit: &'a BigInt) -> Self {
+    if !limit.is_positive() {
+      panic!("Creating range limit <= 0");
+    }
     RangeBig { limit: limit.clone(), offset: Zero::zero() }
   }
   fn new_range(start: &'a BigInt, end: &'a BigInt) -> Self {
+    if start >= end {
+      panic!("empty or inverted range");
+    }
     RangeBig { limit: end - start, offset: start.clone() }
   }
   fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> Self::Output {
@@ -126,6 +138,7 @@ mod tests {
   use super::*;
   use super::super::StdRng;
   use std::panic::catch_unwind;
+  use std;
 
   #[test]
   fn test_bigint() {
@@ -183,5 +196,52 @@ mod tests {
     assert!(catch_unwind(|| StdRng::new().range(&BigUint::from(50u32), &BigUint::from(5u32))).is_err());
     assert!(catch_unwind(|| StdRng::new().range(&BigInt::from(-5i32), &BigInt::from(-5i32))).is_err());
     assert!(catch_unwind(|| StdRng::new().range(&BigInt::from(50u32), &BigInt::from(-5i32))).is_err());
+  }
+
+  #[test]
+  fn test_range_obj() {
+    let mut rng = StdRng::new();
+    let range = rng.make_range_below(&BigUint::from(30u32));
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(x < BigUint::from(30u32));
+    }
+
+    let range = rng.make_range_below(&BigInt::from(30u32));
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(x < BigInt::from(30u32));
+    }
+
+    let lower = BigUint::from_slice(&[std::u32::MAX - 3]);
+    let upper = BigUint::from_slice(&[5, 1]);
+    let range = rng.make_range(&lower, &upper);
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(lower <= x && x < upper);
+    }
+
+    let lower = BigInt::from_slice(Sign::Minus, &[5, 1]);
+    let upper = BigInt::from_slice(Sign::Minus, &[std::u32::MAX - 3]);
+    let range = rng.make_range(&lower, &upper);
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(lower <= x && x < upper);
+    }
+
+    let lower = BigInt::from(-5i8);
+    let upper = BigInt::from(10i8);
+    let range = rng.make_range(&lower, &upper);
+    for _ in 0..1000 {
+      let x = rng.from_range(&range);
+      assert!(lower <= x && x < upper);
+    }
+
+    assert!(catch_unwind(|| StdRng::new().make_range_below(&BigUint::zero())).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range_below(&BigInt::zero())).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range_below(&BigInt::from(-1i8))).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range(&BigUint::from(20u8), &BigUint::from(2u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range(&BigInt::from(20u8), &BigInt::from(2u32))).is_err());
+    assert!(catch_unwind(|| StdRng::new().make_range(&BigInt::from(-2i8), &BigInt::from(-20i32))).is_err());
   }
 }

@@ -273,15 +273,27 @@ mod tests {
   fn test_float() {
     let mut rng = StdRng::new();
     for val in [0.000001f64, 1000000.0, 47.0, f64::from_bits(1), f64::from_bits(0x7fcf_ffff_ffff_ffff)].iter().cloned() {
+      let r1 = rng.make_range_below(val);
+      let r2 = rng.make_range(-val, val);
+      let r3 = if val - 1.0 != val { Some(rng.make_range(val - 1.0, val)) } else { None };
+      let r4 = if val - 1.0 != val { Some(rng.make_range(-val - 1.0, -val)) } else { None };
       for _ in 0..1000 {
         let x = rng.below(val);
         assert!(0.0 <= x && x < val);
         let x = rng.range(-val, val);
         assert!(-val <= x && x < val);
+        let x = rng.from_range(&r1);
+        assert!(0.0 <= x && x < val);
+        let x = rng.from_range(&r2);
+        assert!(-val <= x && x < val);
         if val - 1.0 != val {
           let x = rng.range(val - 1.0, val);
           assert!(val - 1.0 <= x && x < val);
           let x = rng.range(-val - 1.0, -val);
+          assert!(-val - 1.0 <= x && x < -val);
+          let x = rng.from_range(r3.as_ref().unwrap());
+          assert!(val - 1.0 <= x && x < val);
+          let x = rng.from_range(r4.as_ref().unwrap());
           assert!(-val - 1.0 <= x && x < -val);
         }
       }
@@ -295,15 +307,27 @@ mod tests {
     assert!(catch_unwind(|| StdRng::new().below(f64::INFINITY)).is_err());
 
     for val in [0.000001f32, 1000000.0, 47.0, f32::from_bits(1), f32::from_bits(0x7e7f_ffff)].iter().cloned() {
+      let r1 = rng.make_range_below(val);
+      let r2 = rng.make_range(-val, val);
+      let r3 = if val - 1.0 != val { Some(rng.make_range(val - 1.0, val)) } else { None };
+      let r4 = if val - 1.0 != val { Some(rng.make_range(-val - 1.0, -val)) } else { None };
       for _ in 0..1000 {
         let x = rng.below(val);
         assert!(0.0 <= x && x < val);
         let x = rng.range(-val, val);
         assert!(-val <= x && x < val);
+        let x = rng.from_range(&r1);
+        assert!(0.0 <= x && x < val);
+        let x = rng.from_range(&r2);
+        assert!(-val <= x && x < val);
         if val - 1.0 != val {
           let x = rng.range(val - 1.0, val);
           assert!(val - 1.0 <= x && x < val);
           let x = rng.range(-val - 1.0, -val);
+          assert!(-val - 1.0 <= x && x < -val);
+          let x = rng.from_range(r3.as_ref().unwrap());
+          assert!(val - 1.0 <= x && x < val);
+          let x = rng.from_range(r4.as_ref().unwrap());
           assert!(-val - 1.0 <= x && x < -val);
         }
       }
