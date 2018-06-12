@@ -78,9 +78,9 @@ macro_rules! impl_float {
         if start >= end {
           panic!("empty or inverted range");
         }
-        let start_exp = mask((start.to_bits() >> $mantissa_bits), $exp_bits);
-        let end_exp = mask((end.to_bits() >> $mantissa_bits), $exp_bits);
-        if start_exp > bitmask($exp_bits) - 3 || end_exp > bitmask($exp_bits) - 3 {
+        let start_exp = mask(start.to_bits() >> $mantissa_bits, $exp_bits);
+        let end_exp = mask(end.to_bits() >> $mantissa_bits, $exp_bits);
+        if start_exp > bitmask::<$uty, _>($exp_bits) - 3 || end_exp > bitmask::<$uty, _>($exp_bits) - 3 {
           panic!("Overflow or NaN");
         }
         RangeFloat { start, end }
@@ -89,13 +89,13 @@ macro_rules! impl_float {
       #[cfg(not(feature = "exact-floats"))]
       fn gen<'b, R: Rng + ?Sized>(&self, rng: &'b mut R) -> $fty {
         let scale = self.end - self.start;
-        let offset = self.start - self.scale;
-        let exp = bitmask($exp_bits - 1) << $mantissa_bits;
+        let offset = self.start - scale;
+        let exp = bitmask::<$uty, _>($exp_bits - 1) << $mantissa_bits;
         loop {
           let frac = mask(rng.$gen_func(), $mantissa_bits);
           let res = <$fty>::from_bits(frac | exp) * scale + offset;
           // Check for rounding errors
-          if res >= start && res < end {
+          if res >= self.start && res < self.end {
             return res;
           }
         }
